@@ -591,6 +591,38 @@ grep -q 'SKELETON' <<<"$(./scripts/generate-nodes.py --check "$SMOKE/skel.csv" 2
     || sfail "generate-nodes --check: skeleton MACs not refused"
 sed 's/00:00:5e:00:53:/02:5e:10:aa:00:/' "$SMOKE/skel.csv" > "$SMOKE/filled.csv"
 ./scripts/generate-nodes.py --check "$SMOKE/filled.csv" >/dev/null 2>&1 || sfail "generate-nodes --check: filled inventory rejected"
+python3 - "$SMOKE/filled.csv" <<'PY'
+import importlib.util
+import sys
+
+spec = importlib.util.spec_from_file_location("generate_nodes", "scripts/generate-nodes.py")
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+base = mod.load(sys.argv[1])[0]
+unsafe = [
+    ("hostname", "gpu$(touch /tmp/pwn)"),
+    ("hostname", "gpu01;id"),
+    ("hostname", "gpu 01"),
+    ("category", "gpu;id"),
+    ("interface", "ens33$(id)"),
+]
+for field, value in unsafe:
+    row = dict(base)
+    row[field] = value
+    if not mod.check([row]):
+        print(f"unsafe {field} accepted: {value!r}")
+        sys.exit(1)
+for field, value in (("hostname", "gpu01.example.com"),
+                     ("category", "gpu-workers"),
+                     ("interface", "bond0.100")):
+    row = dict(base)
+    row[field] = value
+    errors = mod.check([row])
+    if errors:
+        print(f"valid {field} rejected: {value!r}: {errors}")
+        sys.exit(1)
+PY
+[ $? -eq 0 ] || sfail "generate-nodes: shell-field validation accepted unsafe values or rejected valid ones"
 grep -q '^gpu-worker-1,' "$SMOKE/skel.csv" || sfail "generate-nodes: GPU hostnames don't follow \$GPU_WORKERS"
 ./scripts/generate-nodes.py --vars "$SITEV" "$SMOKE/filled.csv" > "$SMOKE/prov.sh" 2>/dev/null && bash -n "$SMOKE/prov.sh" \
     || sfail "generate-nodes: generated script fails bash -n"
