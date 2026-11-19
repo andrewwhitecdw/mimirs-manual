@@ -52,9 +52,10 @@ generation) REFUSES any row still carrying one, and also the pre-M6
 skeleton pattern 00:50:56:b3:xx:xx (a VMware OUI that older skeletons
 used): an unfilled skeleton never validates, whichever generation made it.
 
-Validation performed: required fields present, no duplicate hostname /
-IP / MAC, IP parses as IPv4, MAC looks like a MAC and is not a skeleton
-placeholder, BMC IP present for gpu role.
+Validation performed: required fields present, shell-safe hostname /
+category / interface values, no duplicate hostname / IP / MAC, IP parses
+as IPv4, MAC looks like a MAC and is not a skeleton placeholder, BMC IP
+present for gpu role.
 
 The generated script is re-runnable (add-or-verify): a node or BMC
 interface that already exists is a NOTE, and the set steps that follow
@@ -76,6 +77,8 @@ from runbook import load_vars, override_requested  # noqa: E402  (one parser for
 
 COLUMNS = ["hostname", "ip", "mac", "role", "category", "interface", "bmc_ip"]
 MAC_RE = re.compile(r"^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$")
+HOST_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$")
+TOKEN_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_.-]*[A-Za-z0-9])?$")
 ROLES = {"ctrl", "worker", "gpu"}
 # RFC 7042 sec. 2.1.2: 00-00-5E-00-53-00..FF is reserved for documentation —
 # it can never belong to a real NIC.
@@ -118,6 +121,12 @@ def check(rows):
         ip = (r.get("ip") or "").strip()
         mac = (r.get("mac") or "").strip().lower()
         role = (r.get("role") or "").strip()
+        for field, value in (("hostname", host),
+                             ("category", (r.get("category") or "").strip()),
+                             ("interface", (r.get("interface") or "").strip())):
+            pattern = HOST_RE if field == "hostname" else TOKEN_RE
+            if not pattern.fullmatch(value) or ".." in value:
+                errors.append(f"{tag}: unsafe {field} {value!r}")
         if host in seen_host:
             errors.append(f"{tag}: duplicate hostname '{host}'")
         seen_host.add(host)
