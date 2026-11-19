@@ -210,11 +210,21 @@ fi
 
 # --- [7] storcli: no virtual drives --------------------------------------
 if command -v storcli >/dev/null 2>&1; then
-  VDRIVES="$(storcli /c0/vall show 2>/dev/null | grep -cE '^[[:space:]]*[0-9]+/' || true)"
-  if [ "$VDRIVES" -eq 0 ]; then
-    pass "[7] storcli /c0/vall: no virtual drives (JBOD/raw OK)"
+  set +e
+  STORCLI_OUT="$(storcli /c0/vall show 2>&1)"
+  STORCLI_RC=$?
+  set -e
+  if [ "$STORCLI_RC" -ne 0 ]; then
+    fail "[7] storcli /c0/vall show exited $STORCLI_RC: $STORCLI_OUT"
+  elif ! printf '%s\n' "$STORCLI_OUT" | grep -qiE '^[[:space:]]*Status[[:space:]]*=[[:space:]]*Success[[:space:]]*$'; then
+    fail "[7] storcli returned unrecognized output without 'Status = Success' — JBOD state is unverified."
   else
-    fail "[7] storcli shows $VDRIVES virtual drive(s) on /c0 — OSD drives must be JBOD, NEVER hardware RAID. Delete virtual drives before Ceph."
+    VDRIVES="$(printf '%s\n' "$STORCLI_OUT" | grep -cE '^[[:space:]]*[0-9]+/' || true)"
+    if [ "$VDRIVES" -eq 0 ]; then
+      pass "[7] storcli /c0/vall: no virtual drives (JBOD/raw OK)"
+    else
+      fail "[7] storcli shows $VDRIVES virtual drive(s) on /c0 — OSD drives must be JBOD, NEVER hardware RAID. Delete virtual drives before Ceph."
+    fi
   fi
   echo "      (Verify the PM1743s do NOT appear under 'storcli /c0/pall show' — they must be direct-to-CPU, not behind the 940-8i.)"
 else
