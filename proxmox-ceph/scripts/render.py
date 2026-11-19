@@ -48,9 +48,10 @@ with --vars, and then prints a NOTE: that is the publisher's check, not a
 site render.
 
 The template docs are never modified; render always writes a fresh
-directory. An existing --out is refused; --force replaces it only if a
-previous render wrote it (the .cerberus-render marker) — never an
-arbitrary directory. Relative links are rewritten so the deliverable
+directory. An existing --out is refused; --force replaces it only after
+verifying the previous render's .cerberus-render JSON manifest and exact
+file inventory — never an arbitrary or modified directory. Relative links
+are rewritten so the deliverable
 stands alone (L2): a linked diagram is copied into <out>/diagrams/; a link
 to a rendered section keeps working; a link to a library file that is not
 part of the deliverable (docs/references.md, a script, the variables
@@ -66,6 +67,7 @@ Python 3.8+, stdlib only (scripts/check.sh proves the grammar floor).
 """
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -78,6 +80,74 @@ SITE_VARS = os.path.join(TRACK_DIR, "site-vars.sh")
 RUNBOOK_DIR = os.path.join(TRACK_DIR, "runbook")
 REPO_DIR = os.path.dirname(TRACK_DIR)
 MARKER = ".cerberus-render"
+
+
+def _manifest_output_path(out, rel):
+    if not isinstance(rel, str) or not rel or rel == MARKER \
+            or rel.startswith("/") or "\\" in rel:
+        raise ValueError(f"unsafe manifest path: {rel!r}")
+    parts = rel.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        raise ValueError(f"unsafe manifest path: {rel!r}")
+    root = os.path.abspath(out)
+    path = os.path.join(root, *parts)
+    if os.path.commonpath((root, os.path.abspath(path))) != root:
+        raise ValueError(f"manifest path escapes output: {rel!r}")
+    current = root
+    for part in parts:
+        current = os.path.join(current, part)
+        if os.path.islink(current):
+            raise ValueError(f"render output contains a symlink: {rel}")
+    if not os.path.isfile(path):
+        raise ValueError(f"manifest file is missing or not regular: {rel}")
+    return path
+
+
+def _remove_previous_render(out):
+    if os.path.islink(out) or not os.path.isdir(out):
+        raise ValueError("output is not a real directory")
+    out = os.path.abspath(out)
+    marker_path = os.path.join(out, MARKER)
+    if os.path.islink(marker_path) or not os.path.isfile(marker_path):
+        raise ValueError(f"no regular {MARKER} manifest")
+    with open(marker_path, encoding="utf-8") as f:
+        document = json.load(f)
+    if not isinstance(document, dict) \
+            or type(document.get("version")) is not int \
+            or document["version"] != 1 \
+            or not isinstance(document.get("files"), list):
+        raise ValueError("legacy or invalid render manifest")
+    files = document["files"]
+    if any(not isinstance(rel, str) for rel in files):
+        raise ValueError("non-string manifest path")
+    if len(set(files)) != len(files):
+        raise ValueError("duplicate manifest paths")
+    owned = {_manifest_output_path(out, rel) for rel in files}
+    actual = set()
+    for current, dirs, names in os.walk(out, followlinks=False):
+        for name in dirs + names:
+            if os.path.islink(os.path.join(current, name)):
+                raise ValueError("render output contains a symlink")
+        for name in names:
+            actual.add(os.path.join(current, name))
+    expected = owned | {marker_path}
+    if actual != expected:
+        raise ValueError("render output has missing or extra files")
+    for path in sorted(owned):
+        os.unlink(path)
+    os.unlink(marker_path)
+    for current, dirs, _names in os.walk(out, topdown=False):
+        for name in dirs:
+            os.rmdir(os.path.join(current, name))
+    os.rmdir(out)
+
+
+def _write_render_manifest(out, files):
+    with open(os.path.join(out, MARKER), "w", encoding="utf-8") as f:
+        json.dump({"version": 1, "files": sorted(files)}, f, indent=2)
+        f.write("\n")
+
+
 IMAGE_EXT = (".svg", ".png", ".jpg", ".jpeg", ".gif")
 LINK_RE = re.compile(r"(!?)\[([^\]]*)\]\(([^)\s]+)\)")
 
@@ -343,16 +413,15 @@ def main():
         print("!! $NAME references. Unset them in this shell when you are done.", file=sys.stderr)
         print(bar, file=sys.stderr)
 
-    if os.path.exists(args.out):
+    if os.path.lexists(args.out):
         if not args.force:
             sys.exit(f"refusing to overwrite existing {args.out} (use --force)")
-        if not os.path.isfile(os.path.join(args.out, MARKER)):
-            sys.exit(f"refusing to replace {args.out}: it was not written by render.py "
-                     f"(no {MARKER} marker) — choose a fresh --out")
-        shutil.rmtree(args.out)
+        try:
+            _remove_previous_render(args.out)
+        except (OSError, ValueError) as e:
+            sys.exit(f"refusing to replace {args.out}: cannot verify a complete "
+                     f"previous render ({e}) — choose a fresh --out")
     os.makedirs(args.out)
-    with open(os.path.join(args.out, MARKER), "w") as f:
-        f.write("written by proxmox-ceph/scripts/render.py; --force may replace this directory\n")
 
     out_abs = os.path.abspath(args.out)
     targets = {os.path.join(RUNBOOK_DIR, s, "README.md"):
@@ -373,6 +442,9 @@ def main():
     for src, dst in sorted(copies.items()):
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copyfile(src, dst)
+    _write_render_manifest(
+        args.out, [os.path.relpath(path, out_abs)
+                   for path in list(targets.values()) + list(copies.values())])
 
     # Report: literal PLACEHOLDER, defined-but-empty (passed through), and
     # audited values still identical to the shipped template defaults.

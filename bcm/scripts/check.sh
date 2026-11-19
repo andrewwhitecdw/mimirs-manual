@@ -722,6 +722,18 @@ grep -rqE '<(BMC-PASSWORD|NGC-API-KEY|BCM-PRODUCT-KEY)>' "$SMOKE/render" \
     && sfail "render L2: an existing --out was overwritten without --force"
 ./scripts/runbook.py --vars 00-variables.sh render --out "$SMOKE/render" --force >/dev/null 2>&1 \
     || sfail "render L2: --force did not replace a previous render"
+: > "$SMOKE/render/precious.txt"
+./scripts/runbook.py --vars 00-variables.sh render --out "$SMOKE/render" --force >/dev/null 2>&1 \
+    && sfail "render L2: --force replaced a render containing an extra file"
+[ -f "$SMOKE/render/precious.txt" ] || sfail "render L2: an extra file was deleted"
+rm -f "$SMOKE/render/precious.txt"
+mkdir -p "$SMOKE/forged"
+printf '%s\n' 'written by bcm/scripts/runbook.py render; --force may replace this directory' \
+    > "$SMOKE/forged/.bcm-render"
+: > "$SMOKE/forged/precious.txt"
+./scripts/runbook.py --vars 00-variables.sh render --out "$SMOKE/forged" --force >/dev/null 2>&1 \
+    && sfail "render L2: a forged legacy marker authorized replacement"
+[ -f "$SMOKE/forged/precious.txt" ] || sfail "render L2: a forged marker lost foreign contents"
 mkdir -p "$SMOKE/foreign" && : > "$SMOKE/foreign/keep.txt"
 ./scripts/runbook.py --vars 00-variables.sh render --out "$SMOKE/foreign" --force >/dev/null 2>&1 \
     && sfail "render L2: --force replaced a directory render did not write"
