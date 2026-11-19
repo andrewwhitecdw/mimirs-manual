@@ -197,9 +197,10 @@ POOL_VM_NAME="${POOL_VM_NAME:-vm-storage}"            # primary RBD pool for VM 
 # Capacity ceiling (04 "Capacity model"): the binding failure is ONE OSD —
 # its sibling on the same host must absorb its data. Reference build
 # (2x 3.84 TB per host): ceiling ~3.3 TB of VM data (~43% raw). Recompute
-# both values for any other drive size/count, or a 4th node.
+# all sizing values for any other drive size/count, or a 4th node.
 POOL_VM_TARGET_SIZE="${POOL_VM_TARGET_SIZE:-3T}"      # autoscaler HINT only (pveceph units are binary: 3T = 3 TiB ~ 3.3 TB)
-POOL_VM_QUOTA_BYTES="${POOL_VM_QUOTA_BYTES:-3300000000000}"   # the GUARD: pool quota = the ceiling, 3.3 TB in bytes
+POOL_VM_QUOTA_BYTES="${POOL_VM_QUOTA_BYTES:-3300000000000}"   # VM pool quota: the reference value, not a generic default
+POOL_CAPACITY_CEILING_BYTES="${POOL_CAPACITY_CEILING_BYTES:-PLACEHOLDER}"   # combined-pool guard; 3300000000000 is the reference example only
 
 # ------------------------------------------------- Proxmox HA defaults (see 05)
 HA_RULE_NAME="${HA_RULE_NAME:-ha-prefer-any}"         # node-affinity rule name
@@ -313,7 +314,7 @@ cerberus_audit_placeholders() {
         fi
     done < <(env -i bash --noprofile --norc -c '
         source "$1" >/dev/null 2>&1 || exit 2
-        compgen -v | grep -E "(_NET|_GW|_IP|_IPS)\$|^(PBS_HOST_IP|DNS_SERVERS|NTP_SERVERS|MAILTO|POOL_VM_TARGET_SIZE|POOL_VM_QUOTA_BYTES|XCC_USER|PBS_DATASTORE_PATH)\$" \
+        compgen -v | grep -E "(_NET|_GW|_IP|_IPS)\$|^(PBS_HOST_IP|DNS_SERVERS|NTP_SERVERS|MAILTO|POOL_VM_TARGET_SIZE|POOL_VM_QUOTA_BYTES|POOL_CAPACITY_CEILING_BYTES|XCC_USER|PBS_DATASTORE_PATH)\$" \
           | grep -vE "^(BASH|COMP|HOST|MACH|OS|PPID|UID|EUID)" | sort \
           | while read -r n; do printf "%s=%s\n" "$n" "${!n}"; done' _ "$tmpl")
     echo "--- host-resolved (must be exported per node; undefined in the template) ---"
