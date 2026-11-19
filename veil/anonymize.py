@@ -997,6 +997,18 @@ def main(argv=None):
     mappath = None
     if writing:
         mappath = Path(args.map) if args.map else out_res.parent / "anonymize-map.json"
+        if mappath.is_symlink():
+            err(f"{str(mappath)!r} is a symlink; refusing to write the map "
+                "through it.")
+            return 2
+        if mappath.exists() and not mappath.is_file():
+            err(f"{str(mappath)!r} is not a regular file; refusing to use it "
+                "as the map.")
+            return 2
+        if mappath.exists() and (mappath.stat().st_mode & 0o077):
+            err(f"{str(mappath)!r} permissions are not owner-only; expected "
+                "mode 0600. Move it aside or chmod it before rerunning.")
+            return 2
         if is_inside(mappath.resolve(), out_res):
             err(f"--map {str(mappath)!r} is inside --out: the map contains the "
                 f"real values and must never ship with the bundle.")
@@ -1279,7 +1291,13 @@ def main(argv=None):
                 shutil.copyfile(payload, dest)
             written.add(new_rel)
         mappath.parent.mkdir(parents=True, exist_ok=True)
-        mappath.write_text(mapdoc, encoding="utf-8")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        fd = os.open(mappath, flags, 0o600)
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(mapdoc)
         print(f"\nWROTE {mappath.resolve()} -- PRIVATE, contains real values. "
               f"Do not commit.", file=sys.stderr)
         # re-scan what is actually on disk in --out (all of it)

@@ -129,7 +129,7 @@ stderr (file, value class, line context) and the run exits non-zero.
 |---|---|
 | 0 | clean |
 | 1 | no input files, or an anonymized-filename collision (nothing written; `--scan` reports it too) |
-| 2 | usage error, or refused by a guard: an input is or contains a symlink, `--out` is/inside an input, no client names for `--out`, client/vocabulary collision, a pre-existing output file differs, `--map` inside `--out`, default map path holds a different run's map |
+| 2 | usage error, or refused by a guard: an input is or contains a symlink, `--out` is/inside an input, no client names for `--out`, client/vocabulary collision, a pre-existing output file differs, `--map` inside `--out`, an insecure/non-regular/symlink map, default map path holds a different run's map |
 | 3 | `LEAK` survivors found — do not publish |
 
 ## Warnings
@@ -138,8 +138,10 @@ stderr (file, value class, line context) and the run exits non-zero.
   contains the real names. Never commit it.** By default it is written
   **next to** the output directory (`<parent-of-out>/anonymize-map.json`),
   never inside it; the stderr line states the exact path written. `--map`
-  overrides (but may not point inside `--out`). Same goes for your
-  client-file.
+  overrides (but may not point inside `--out`). Maps are always written
+  with mode `0600`, regardless of umask. Existing maps with group/other
+  permissions, non-regular maps, and map symlinks (including dangling
+  links) are refused without truncation. Same goes for your client-file.
 - Files that cannot be scrubbed — binary suffixes (images, PDFs, archives),
   anything that isn't valid UTF-8, and anything containing NUL bytes
   (UTF-16 without a BOM is valid UTF-8 byte-wise but can't be scrubbed) —
