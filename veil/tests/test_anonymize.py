@@ -18,6 +18,7 @@ import json
 import os
 import random
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -555,6 +556,49 @@ class V8MapLeavesTheBundle(VeilCase):
         r = self.write(*ACME)
         self.assertRc(r, 2)
         self.assertEqual((self.tmp / "anonymize-map.json").read_text(), '{"another": "run"}\n')
+
+    def test_new_map_is_owner_only_under_permissive_umask(self):
+        self.bundle({"a.md": "Acme Widgets\n"})
+        old = os.umask(0)
+        try:
+            r = self.write(*ACME)
+        finally:
+            os.umask(old)
+        self.assertRc(r, 0)
+        mp = self.tmp / "anonymize-map.json"
+        self.assertEqual(stat.S_IMODE(mp.stat().st_mode), 0o600)
+
+    def test_insecure_existing_map_is_rejected_without_rewrite(self):
+        self.bundle({"a.md": "Acme Widgets\n"})
+        self.assertRc(self.write(*ACME), 0)
+        mp = self.tmp / "anonymize-map.json"
+        mp.chmod(0o644)
+        before = mp.read_bytes()
+        r = self.write(*ACME)
+        self.assertRc(r, 2)
+        self.assertIn("owner-only", r.stderr)
+        self.assertEqual(mp.read_bytes(), before)
+        self.assertEqual(stat.S_IMODE(mp.stat().st_mode), 0o644)
+
+    def test_symlink_map_is_rejected_without_touching_target(self):
+        self.bundle({"a.md": "Acme Widgets\n"})
+        for dangling in (False, True):
+            with self.subTest(dangling=dangling):
+                target = self.tmp / ("missing-target.json" if dangling
+                                     else "existing-target.json")
+                if not dangling:
+                    target.write_text("do not truncate\n")
+                mp = self.tmp / ("dangling-map.json" if dangling
+                                 else "linked-map.json")
+                mp.symlink_to(target)
+                r = self.write(*ACME, "--map", str(mp))
+                self.assertRc(r, 2)
+                self.assertIn("symlink", r.stderr)
+                self.assertTrue(mp.is_symlink())
+                if dangling:
+                    self.assertFalse(target.exists())
+                else:
+                    self.assertEqual(target.read_text(), "do not truncate\n")
 
 
 # ===================================================================== V9-V11
