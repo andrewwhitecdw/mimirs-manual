@@ -62,7 +62,7 @@ class ExitCodes(unittest.TestCase):
     def test_healthy_with_warnings_is_0(self):
         # an adjudicated pass is a pass (see REPORT-B open question)
         adj = S.write_adjudications(os.path.join(self.tmp, "adj.csv"), [
-            ("a", "NVSM Health", "Warned", "ruled benign")])
+            ("a", "NVSM Health", "Warned", "test-reviewer", "ruled benign")])
         sh = S.run_tracker(["--vitals", self._vitals([
             S.full_dgx("a", "NOT HEALTHY", NVSM_Health="Failed")]),
             "--adjudications", adj], self.tmp)
@@ -124,7 +124,7 @@ class ExitCodes(unittest.TestCase):
 
     def test_unmatched_adjudication_is_1(self):
         adj = S.write_adjudications(os.path.join(self.tmp, "adj.csv"), [
-            ("ghost", "NVSM Health", "Warned", "")])
+            ("ghost", "NVSM Health", "Warned", "test-reviewer", "no such host")])
         sh = S.run_tracker(["--vitals", self._vitals([S.full_dgx("a")]),
                             "--adjudications", adj], self.tmp)
         self.assertEqual(sh.rc, 1)

@@ -17,7 +17,7 @@ class AdjudicatedFooter(unittest.TestCase):
         self.tmp = S.tempdir(self)
         self.adj = S.write_adjudications(
             os.path.join(self.tmp, "adj.csv"),
-            [("gpu01", "NVSM Stress Test", "Warned", "ruled benign")])
+            [("gpu01", "NVSM Stress Test", "Warned", "test-reviewer", "ruled benign")])
 
     def _vitals(self, name):
         return S.write_vitals_root(os.path.join(self.tmp, name),
