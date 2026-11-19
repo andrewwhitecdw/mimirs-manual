@@ -158,5 +158,49 @@ class SpreadsheetFormulaSafety(unittest.TestCase):
                 self.assertEqual(sh.get(safe, "% Complete"), 100)
 
 
+class AccountableAdjudication(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = S.tempdir(self)
+        self.root = S.write_vitals_root(
+            os.path.join(self.tmp, "vitals"),
+            [S.full_dgx("gpu01", "NOT HEALTHY", NVSM_Health="Failed")])
+
+    def _run(self, row, name):
+        adj = S.write_adjudications(
+            os.path.join(self.tmp, name + ".csv"), [row])
+        return S.run_tracker(
+            ["--vitals", self.root, "--adjudications", adj],
+            self.tmp, name + ".xlsx")
+
+    def test_invalid_rows_are_not_applied_and_preserve_failed_evidence(self):
+        rows = (
+            ("empty-note", ("gpu01", "NVSM Health", "Warned",
+                            "reviewer", "")),
+            ("missing-reviewer", ("gpu01", "NVSM Health", "Warned",
+                                  "", "documented reason")),
+            ("complete-override", ("gpu01", "NVSM Health", "Complete",
+                                   "reviewer", "clean re-run passed")),
+        )
+        for name, row in rows:
+            with self.subTest(name=name):
+                sh = self._run(row, name)
+                self.assertEqual(sh.rc, 1)
+                self.assertEqual(sh.get("gpu01", "NVSM Health"), "Failed")
+                self.assertEqual(sh.get("gpu01", "Overall"), "NOT HEALTHY")
+                self.assertTrue(any("NOT APPLIED" in line for line in sh.footer),
+                                sh.footer)
+
+    def test_valid_warning_names_reviewer_in_notes_and_footer(self):
+        sh = self._run(
+            ("gpu01", "NVSM Health", "Warned", "reviewer",
+             "documented false positive"), "valid")
+        self.assertEqual(sh.rc, 0)
+        self.assertEqual(sh.get("gpu01", "NVSM Health"), "Warned")
+        self.assertEqual(sh.get("gpu01", "Overall"), "HEALTHY WITH WARNINGS")
+        self.assertIn("reviewer", sh.get("gpu01", "Notes"))
+        self.assertTrue(any("reviewer" in line for line in sh.footer), sh.footer)
+
+
 if __name__ == "__main__":
     unittest.main()

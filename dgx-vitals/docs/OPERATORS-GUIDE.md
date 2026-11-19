@@ -440,14 +440,18 @@ The block holds:
 One-off rulings go in a CSV passed with `--adjudications`:
 
 ```csv
-hostname,step,state,note
-dgx-07,NVSM Stress Test,Complete,Original run collided with a stress already running service-side; clean re-run passed — ruling recorded by the operator
+hostname,step,state,reviewer,note
+dgx-07,NVSM Stress Test,Warned,jane.doe,Original run collided with a service-side stress test; reviewed as a warning
 ```
 
 - `step` is one of the six tracker step names or `NCCL Tests`;
-  `state` is `Complete`, `Failed`, `Skipped`, or `Warned`.
-- A row that matches no host or no valid step is reported in the
-  footer as NOT APPLIED, and the build exits 1.
+  `state` is `Failed`, `Skipped`, or `Warned`. `reviewer` and a
+  substantive `note` are required, and both are preserved in the sheet.
+- `Complete` is not a permitted manual override. A clean re-run is the
+  only way to replace failed evidence with Complete.
+- An invalid row, or one that matches no host or valid step, is reported
+  in the footer as NOT APPLIED, leaves the raw evidence unchanged, and
+  makes the build exit 1.
 
 ## Common snags
 

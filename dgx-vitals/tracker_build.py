@@ -61,8 +61,8 @@ Exit codes:
         carries no evidence (NO DATA, SKIPPED, DRY RUN).
     1   the tool itself failed or could not fully read its input: a bad
         argument, a missing or unreadable root, a corrupt or unidentifiable
-        bundle, quarantined evidence, an adjudication row that matched
-        nothing, or a sheet that could not be written. 1 wins over 2.
+        bundle, quarantined evidence, an invalid or unmatched adjudication
+        row, or a sheet that could not be written. 1 wins over 2.
     No path exits 0 on input it could not fully read.
 
 Judgement rules (deliberate; also written into the sheet's README tab):
@@ -1581,21 +1581,22 @@ def adjudicate(hosts, manual):
             r.overall = ""
             report["KI-2"].append(name)
             report["ki2_facts"].append((name, r.nccl_ev))
-    for host, step, state, note in manual:
+    for host, step, state, reviewer, note in manual:
         r = hosts.get(host)
         if r is None or (step != NCCL and step not in TRACKER_STEPS) \
-                or state not in ("Complete", "Failed", "Skipped", "Warned"):
-            report["unmatched"].append((host, step, state, note))
+                or state not in ("Failed", "Skipped", "Warned") \
+                or not reviewer or not note:
+            report["unmatched"].append((host, step, state, reviewer, note))
             continue
         if step == NCCL:
             r.nccl = state
         else:
             r.steps[step] = state
         r.card_dirty = r.adjudicated = True
-        r.notes.append(f"Manual adjudication: {step} set to {state}"
-                       + (f" — {note}" if note else ""))
+        r.notes.append(f"Manual adjudication by {reviewer}: {step} set to "
+                       f"{state} — {note}")
         r.overall = ""
-        report["manual"].append((host, step, state, note))
+        report["manual"].append((host, step, state, reviewer, note))
     return report
 
 
@@ -1686,16 +1687,14 @@ def nccl_footer(groups):
 
 
 def read_adjudications(path):
-    """Manual adjudications CSV (header hostname,step,state,note)."""
+    """Manual adjudications CSV (hostname,step,state,reviewer,note)."""
     rows = []
     with open(path, newline="", encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
-            host = (row.get("hostname") or "").strip()
-            step = (row.get("step") or "").strip()
-            state = (row.get("state") or "").strip()
-            note = (row.get("note") or "").strip()
-            if host and step and state:
-                rows.append((host, step, state, note))
+            values = tuple((row.get(key) or "").strip() for key in
+                           ("hostname", "step", "state", "reviewer", "note"))
+            if any(values):
+                rows.append(values)
     return rows
 
 # ---------------------------------------------------------------------------
@@ -2071,12 +2070,13 @@ def build_sheet(order, hosts, out_path, title, adj_report=None,
             lines.append(ki2_footer(adj_report["ki2_facts"]))
         if untested:
             lines.append(nccl_footer(untested))
-        for host, step, state, note in adj_report["manual"]:
+        for host, step, state, reviewer, note in adj_report["manual"]:
             lines.append(f"Manual adjudication — {host}: {step} set to "
-                         f"{state}." + (f" {note}" if note else ""))
-        for host, step, state, note in adj_report["unmatched"]:
-            lines.append(f"NOT APPLIED — adjudication row for {host} "
-                         f"({step} -> {state}) matched no host/step.")
+                         f"{state} by {reviewer}. {note}")
+        for host, step, state, reviewer, note in adj_report["unmatched"]:
+            lines.append(f"NOT APPLIED — adjudication row for {host or '?'} "
+                         f"({step or '?'} -> {state or '?'}) was invalid or "
+                         "matched no host/step.")
         prov = provenance_line(sources)
         if prov:
             lines.append(prov)
@@ -2308,8 +2308,9 @@ EXIT_HELP = """exit codes:
      (NO DATA, SKIPPED)
   1  the tool failed or could not fully read its input (bad argument,
      missing/unreadable root, unreadable or malformed fleet CSV, corrupt
-     or unidentifiable bundle, quarantined input, unmatched adjudication,
-     openpyxl/Pillow missing, sheet not written); 1 wins over 2. No path
+     or unidentifiable bundle, quarantined input, invalid or unmatched
+     adjudication, openpyxl/Pillow missing, sheet not written); 1 wins
+     over 2. No path
      exits 0 on input it could not fully read.
 
 tracker_build.py v""" + VERSION + " (dgx-vitals 2.0 verdict contract)"
@@ -2356,7 +2357,7 @@ def main(argv=None):
                     help="sheet title line (e.g. the engagement name)")
     ap.add_argument("--adjudications", metavar="CSV",
                     help="manual adjudications CSV "
-                         "(hostname,step,state,note)")
+                         "(hostname,step,state,reviewer,note)")
     ap.add_argument("--require-nccl", action="store_true",
                     help="hold dgx hosts to NCCL too (hgx always is): a "
                          "host with no NCCL result is INCOMPLETE")

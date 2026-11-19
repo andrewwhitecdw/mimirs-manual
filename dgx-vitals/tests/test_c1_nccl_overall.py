@@ -58,7 +58,7 @@ class NcclFailedForcesNotHealthy(unittest.TestCase):
                                    cards={"gpu02"})
         adj = S.write_adjudications(
             os.path.join(self.tmp, "adj.csv"),
-            [("gpu02", "NVSM Stress Test", "Warned", "ruled benign")])
+            [("gpu02", "NVSM Stress Test", "Warned", "test-reviewer", "ruled benign")])
         sh = S.run_tracker(["--vitals", root, "--adjudications", adj],
                            self.tmp)
         self.assertEqual(sh.get("gpu02", "Overall"), "NOT HEALTHY")
