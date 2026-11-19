@@ -682,6 +682,15 @@ def _verdict_health(text):
         u, m = counts["unknown"]
         return INCOMPLETE, f"{u} of {m} checks unknown"
     h, m = counts["healthy"]
+    if h == 0 or m == 0 or h > m:
+        return INCOMPLETE, "no positive healthy-check evidence"
+    if any(total != m for _n, total in counts.values() if total):
+        return INCOMPLETE, "inconsistent NVSM health-summary totals"
+    unaccounted = m - h - counts["unhealthy"][0]
+    if unaccounted or any(counts.get(kind, (0, 0))[0] > 0
+                          for kind in ("informational", "disabled", "skipped")):
+        return INCOMPLETE, (f"{max(unaccounted, 0)} checks without "
+                            "healthy/unhealthy evidence")
     return PASS, f"{h} of {m} checks healthy, 0 unhealthy"
 
 
