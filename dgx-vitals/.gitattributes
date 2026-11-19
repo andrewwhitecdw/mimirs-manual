@@ -1,2 +1,3 @@
-# Corpus fixtures are byte-faithful field evidence (CRLF intact, sha256 in PROVENANCE.md)
+# Retained field fixtures are byte-faithful; synthetic FULLLOGs are deterministic.
 tests/fixtures/** binary
+tests/fixtures/corpus/PROVENANCE.md text diff

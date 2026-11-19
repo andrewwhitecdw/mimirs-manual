@@ -1,8 +1,8 @@
 """Brief C item 2 (H7) — PASS only on positive structural evidence.
 
 Topology: the GPU submatrix of `nvidia-smi topo -m` parsed by structure
-against the expected class from profile data (real B300 output from the
-corpus: PASS; a PCIe-class or narrower-NVLink cell: degraded FAIL; no
+against the expected class from profile data (an 8-GPU B300-shaped fixture
+matrix: PASS; a PCIe-class or narrower-NVLink cell: degraded FAIL; no
 readable matrix: INCOMPLETE). Stress: 100% Complete + all five component
 PASS lines + wall duration >= 1500 s (genuine 1827 s run: PASS; 0.9 s
 echoed prompt: FAIL; already-running cancellation: FAIL). The other

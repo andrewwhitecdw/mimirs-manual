@@ -2,3 +2,4 @@ __pycache__/
 validation-output/
 Results/
 *-FULLLOG.txt
+!tests/fixtures/corpus/**/*-FULLLOG.txt
