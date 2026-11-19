@@ -485,4 +485,31 @@ else
     echo "FAIL cerberus_audit_placeholders does not audit PBS_DATASTORE_PATH"; fail=1
 fi
 
+echo "== net-verify: missing required UDP tooling fails =="
+mkdir -p "$TMP/netbin"
+for tool in bash dirname realpath grep; do
+    ln -s "$(command -v "$tool")" "$TMP/netbin/$tool"
+done
+cat > "$TMP/netbin/ping" <<'STUB'
+#!/bin/sh
+exit 0
+STUB
+cat > "$TMP/netbin/hostname" <<'STUB'
+#!/bin/sh
+if [ "${1:-}" = "-I" ]; then echo "127.0.0.1"; else echo "test-node"; fi
+STUB
+chmod +x "$TMP/netbin/ping" "$TMP/netbin/hostname"
+cp "$TEMPLATE" "$TMP/net-vars.sh"
+set +e
+PATH="$TMP/netbin" bash "$TRACK_DIR/scripts/net-verify.sh" \
+    --vars "$TMP/net-vars.sh" --no-iperf3 >"$TMP/net-verify.out" 2>&1
+rc=$?
+set -e
+if [ "$rc" -ne 0 ] && grep -q 'cannot probe UDP' "$TMP/net-verify.out" \
+   && ! grep -q 'ALL CHECKS PASSED' "$TMP/net-verify.out"; then
+    echo "OK   missing nc fails closed without an all-pass verdict"
+else
+    echo "FAIL missing nc produced a pass or unclear verdict (rc=$rc)"; fail=1
+fi
+
 if [ "$fail" -eq 0 ]; then echo "ALL CHECKS PASSED"; else echo "CHECKS FAILED"; exit 1; fi
