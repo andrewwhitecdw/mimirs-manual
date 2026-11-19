@@ -24,7 +24,7 @@ component: see [Requirements](#requirements)). Take only the piece you
 need with a sparse checkout:
 
 ```
-git clone --filter=blob:none --sparse https://github.com/LokiX1/mimirs-manual.git
+git clone --filter=blob:none --sparse https://github.com/AltonHill/mimirs-manual.git
 cd mimirs-manual
 git sparse-checkout set dgx-vitals
 ```
@@ -38,9 +38,7 @@ Swap the last line for the piece you want:
 - `proxmox-ceph` — **Cerberus**, the Proxmox VE + Ceph hyperconverged
   runbook.
 
-Update later with a plain `git pull` inside the checkout. (On the CDW
-side, clone the AltonHill mirror of this repo instead — the same
-commands apply.)
+Update later with a plain `git pull` inside the checkout.
 
 ## The tracks
 

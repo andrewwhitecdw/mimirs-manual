@@ -251,6 +251,11 @@ while IFS= read -r f; do FRONT+=("$f"); done < <(find ../docs -name '*.md' | sor
 bash_n_blocks "${FRONT[@]}" || fail=1
 placeholder_lint "${FRONT[@]}" || fail=1
 python3 scripts/reflint.py --docs "${FRONT[@]}" || fail=1
+if ! grep -q 'https://github.com/AltonHill/mimirs-manual.git' ../README.md \
+   || grep -q 'github.com/LokiX1/mimirs-manual' ../README.md; then
+    say "FAIL front door: sparse-checkout must use the canonical AltonHill clone URL"
+    fail=1
+fi
 
 say "== Kubernetes CIDR guard =="
 # Fails closed (C1): each K8s net/mask must be a valid network address,
