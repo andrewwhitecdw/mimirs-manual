@@ -1150,5 +1150,27 @@ class N2ClientTokenInsideUnlistedFqdn(VeilCase):
         self.assertRegex(r.stdout, r"example\.internal  <- globex\.com  \(auto")
 
 
+class InputSymlinkRefusal(VeilCase):
+    def test_explicit_input_symlink_is_refused(self):
+        external = self.tmp / "confidential.txt"
+        external.write_text("Acme Widgets confidential\n", encoding="utf-8")
+        link = self.tmp / "linked.txt"
+        os.symlink(external, link)
+        r = self.write(*ACME, inputs=[str(link)])
+        self.assertRc(r, 2)
+        self.assertIn("input symlinks are refused", r.stderr)
+        self.assertFalse(self.out.exists())
+
+    def test_directory_contained_symlink_is_refused_before_output(self):
+        external = self.tmp / "confidential.txt"
+        external.write_text("Acme Widgets confidential\n", encoding="utf-8")
+        self.bundle({"ordinary.md": "Acme Widgets\n"})
+        os.symlink(external, self.inp / "linked.txt")
+        r = self.write(*ACME)
+        self.assertRc(r, 2)
+        self.assertIn("input symlinks are refused", r.stderr)
+        self.assertFalse(self.out.exists())
+
+
 if __name__ == "__main__":
     unittest.main()
