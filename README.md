@@ -366,3 +366,7 @@ does not round them to one number.
   only; runs on the node itself or from a jump host over SSH
   (`hosts.csv`); the NCCL step needs the `nccl-tests` binaries on the
   node. `tracker_build.py` additionally needs `openpyxl` and `pillow`.
+
+## License
+
+This project is available under the [MIT License](LICENSE).

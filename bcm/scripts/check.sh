@@ -256,6 +256,16 @@ if ! grep -q 'https://github.com/AltonHill/mimirs-manual.git' ../README.md \
     say "FAIL front door: sparse-checkout must use the canonical AltonHill clone URL"
     fail=1
 fi
+if [ ! -f ../LICENSE ] \
+   || ! grep -qx 'MIT License' ../LICENSE \
+   || ! grep -qx 'Copyright (c) 2026 E. Alton Hill' ../LICENSE \
+   || ! grep -q 'Permission is hereby granted, free of charge, to any person obtaining a copy' ../LICENSE \
+   || ! grep -q 'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR' ../LICENSE \
+   || ! grep -q 'AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER' ../LICENSE \
+   || ! grep -q '\[MIT License\](LICENSE)' ../README.md; then
+    say "FAIL front door: standard MIT LICENSE or README license link is missing"
+    fail=1
+fi
 
 say "== Kubernetes CIDR guard =="
 # Fails closed (C1): each K8s net/mask must be a valid network address,
