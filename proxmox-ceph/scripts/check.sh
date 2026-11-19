@@ -485,7 +485,15 @@ else
     echo "FAIL cerberus_audit_placeholders does not audit PBS_DATASTORE_PATH"; fail=1
 fi
 
-echo "== net-verify: missing required UDP tooling fails =="
+echo "== net-verify: passive mode owns no active-probe resources =="
+NET_VERIFY="$TRACK_DIR/scripts/net-verify.sh"
+if ! grep -qF '/tmp/cerberus-udp-probe' "$NET_VERIFY" \
+   && ! grep -qF 'pkill -f' "$NET_VERIFY" \
+   && grep -q -- '--active-probes' "$NET_VERIFY"; then
+    echo "OK   fixed remote paths and broad iperf3 kills are absent"
+else
+    echo "FAIL net-verify retains an unowned temp path, broad kill, or implicit active mode"; fail=1
+fi
 mkdir -p "$TMP/netbin"
 for tool in bash dirname realpath grep; do
     ln -s "$(command -v "$tool")" "$TMP/netbin/$tool"
@@ -498,18 +506,49 @@ cat > "$TMP/netbin/hostname" <<'STUB'
 #!/bin/sh
 if [ "${1:-}" = "-I" ]; then echo "127.0.0.1"; else echo "test-node"; fi
 STUB
-chmod +x "$TMP/netbin/ping" "$TMP/netbin/hostname"
+for tool in ssh nc iperf3 timeout mktemp; do
+    cat > "$TMP/netbin/$tool" <<'STUB'
+#!/bin/sh
+printf '%s %s\n' "${0##*/}" "$*" >> "$NET_VERIFY_TEST_LOG"
+exit 1
+STUB
+done
+cat > "$TMP/netbin/sleep" <<'STUB'
+#!/bin/sh
+exit 0
+STUB
+chmod +x "$TMP/netbin/ping" "$TMP/netbin/hostname" "$TMP/netbin/ssh" \
+    "$TMP/netbin/nc" "$TMP/netbin/iperf3" "$TMP/netbin/timeout" \
+    "$TMP/netbin/mktemp" "$TMP/netbin/sleep"
 cp "$TEMPLATE" "$TMP/net-vars.sh"
+: > "$TMP/net-commands.log"
 set +e
-PATH="$TMP/netbin" bash "$TRACK_DIR/scripts/net-verify.sh" \
-    --vars "$TMP/net-vars.sh" --no-iperf3 >"$TMP/net-verify.out" 2>&1
+PATH="$TMP/netbin" NET_VERIFY_TEST_LOG="$TMP/net-commands.log" \
+    bash "$NET_VERIFY" --vars "$TMP/net-vars.sh" >"$TMP/net-passive.out" 2>&1
 rc=$?
 set -e
-if [ "$rc" -ne 0 ] && grep -q 'cannot probe UDP' "$TMP/net-verify.out" \
-   && ! grep -q 'ALL CHECKS PASSED' "$TMP/net-verify.out"; then
-    echo "OK   missing nc fails closed without an all-pass verdict"
+if [ "$rc" -eq 2 ] \
+   && grep -qF 'NET-VERIFY: INCOMPLETE — --active-probes not enabled' "$TMP/net-passive.out" \
+   && ! grep -q 'ALL CHECKS PASSED' "$TMP/net-passive.out" \
+   && [ ! -s "$TMP/net-commands.log" ]; then
+    echo "OK   passive mode runs no listener/temp commands and exits incomplete"
 else
-    echo "FAIL missing nc produced a pass or unclear verdict (rc=$rc)"; fail=1
+    echo "FAIL passive mode ran active commands or gave the wrong verdict (rc=$rc)"; fail=1
+    cat "$TMP/net-passive.out"
+    cat "$TMP/net-commands.log"
+fi
+rm "$TMP/netbin/nc"
+set +e
+PATH="$TMP/netbin" NET_VERIFY_TEST_LOG="$TMP/net-commands.log" \
+    bash "$NET_VERIFY" --vars "$TMP/net-vars.sh" --active-probes --no-iperf3 \
+    >"$TMP/net-active-no-nc.out" 2>&1
+rc=$?
+set -e
+if [ "$rc" -ne 0 ] && grep -q 'cannot probe UDP' "$TMP/net-active-no-nc.out" \
+   && ! grep -q 'ALL CHECKS PASSED' "$TMP/net-active-no-nc.out"; then
+    echo "OK   active mode without nc fails closed without an all-pass verdict"
+else
+    echo "FAIL active mode without nc produced a pass or unclear verdict (rc=$rc)"; fail=1
 fi
 
 echo "== preflight: storcli status and output are fail-closed =="
