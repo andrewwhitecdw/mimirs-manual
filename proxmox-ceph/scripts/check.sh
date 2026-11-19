@@ -493,21 +493,92 @@ fi
 #     cerberus_audit_placeholders.
 if grep -q '^  MAILTO=ops@example.com$' "$TMP/render.log" \
    && grep -q '^  POOL_VM_QUOTA_BYTES=' "$TMP/render.log" \
+   && grep -q '^  POOL_CAPACITY_CEILING_BYTES=' "$TMP/render.log" \
    && grep -q '^  POOL_VM_TARGET_SIZE=' "$TMP/render.log" \
    && grep -q '^  PBS_DATASTORE_PATH=' "$TMP/render.log"; then
-    echo "OK   template-default audit reports MAILTO, POOL_VM_TARGET_SIZE, POOL_VM_QUOTA_BYTES, PBS_DATASTORE_PATH"
+    echo "OK   template-default audit reports MAILTO, pool sizing/capacity, PBS_DATASTORE_PATH"
 else
-    echo "FAIL template-default audit does not report MAILTO / pool sizing / PBS_DATASTORE_PATH"; fail=1
+    echo "FAIL template-default audit does not report MAILTO / pool sizing/capacity / PBS_DATASTORE_PATH"; fail=1
 fi
 # (output to a file first: under pipefail, grep -q closing the pipe early
 # would fail the producer; the audit's own non-zero exit is expected here)
 env -i CERBERUS_TEMPLATE="$TEMPLATE" bash --noprofile --norc -c \
     'source "$1" >/dev/null 2>&1; cerberus_audit_placeholders' _ "$TEMPLATE" >"$TMP/node-audit.out" 2>&1 || true
-if grep -q '^PBS_DATASTORE_PATH  *' "$TMP/node-audit.out"; then
-    echo "OK   node-shell cerberus_audit_placeholders reports PBS_DATASTORE_PATH at its template default"
+if grep -q '^PBS_DATASTORE_PATH  *' "$TMP/node-audit.out" \
+   && grep -q '^POOL_CAPACITY_CEILING_BYTES  *' "$TMP/node-audit.out"; then
+    echo "OK   node-shell audit reports PBS_DATASTORE_PATH and POOL_CAPACITY_CEILING_BYTES"
 else
-    echo "FAIL cerberus_audit_placeholders does not audit PBS_DATASTORE_PATH"; fail=1
+    echo "FAIL node-shell audit omits PBS_DATASTORE_PATH or POOL_CAPACITY_CEILING_BYTES"; fail=1
 fi
+
+echo "== second pool: site ceiling is required and validated =="
+if python3 - "$TRACK_DIR" "$TMP" <<'EOF'
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+track = Path(sys.argv[1])
+tmp = Path(sys.argv[2])
+variables = (track / "runbook/00-overview/variables.sh").read_text()
+render = (track / "scripts/render.py").read_text()
+runbook = (track / "runbook/04-pools/README.md").read_text()
+failed = False
+if "CEILING_BYTES=3300000000000" in runbook \
+        or 'POOL_CAPACITY_CEILING_BYTES="${POOL_CAPACITY_CEILING_BYTES:-PLACEHOLDER}"' not in variables \
+        or "POOL_CAPACITY_CEILING_BYTES" not in render \
+        or "cerberus_require_vars POOL_VM_QUOTA_BYTES POOL_CAPACITY_CEILING_BYTES" not in runbook:
+    print("FAIL site ceiling is absent from the template, audits, or second-pool guard")
+    failed = True
+blocks = re.findall(r"```bash\n(.*?)```", runbook, re.S)
+matches = [block for block in blocks if "pveceph pool create bulk-scratch" in block]
+if len(matches) != 1:
+    print("FAIL second-pool block is not uniquely extractable")
+    sys.exit(1)
+for case, ceiling, should_run in (
+        ("placeholder", "PLACEHOLDER", False),
+        ("non-numeric", "not-a-number", False),
+        ("zero", "0", False),
+        ("negative", "-1", False),
+        ("positive", "3300000000000", True)):
+    case_dir = tmp / ("pool-" + case)
+    bin_dir = case_dir / "bin"
+    bin_dir.mkdir(parents=True)
+    site = variables + f'\nPOOL_CAPACITY_CEILING_BYTES="{ceiling}"\n'
+    (case_dir / "site-vars.sh").write_text(site)
+    (case_dir / "second-pool").write_text(matches[0])
+    log = case_dir / "operations.log"
+    log.write_text("")
+    for tool in ("pveceph", "ceph"):
+        path = bin_dir / tool
+        path.write_text(
+            "#!/bin/sh\n"
+            "printf '%s %s\\n' '${0##*/}' \"$*\" >> \"$TEST_OPERATION_LOG\"\n"
+        )
+        path.chmod(0o755)
+    env = os.environ.copy()
+    env.update(
+        PATH=str(bin_dir) + os.pathsep + env["PATH"],
+        CERBERUS_TRACK=str(case_dir),
+        POOL_BULK_TARGET_SIZE="1T",
+        POOL_BULK_QUOTA_BYTES="1",
+        TEST_OPERATION_LOG=str(log),
+    )
+    result = subprocess.run(
+        ["bash", str(case_dir / "second-pool")],
+        env=env, capture_output=True, text=True,
+    )
+    ran = bool(log.read_text())
+    passed = result.returncode == 0 and ran if should_run else result.returncode != 0 and not ran
+    if passed:
+        print(f"OK   {case} ceiling: pool commands {'reached' if ran else 'not reached'}")
+    else:
+        print(f"FAIL {case} ceiling: rc={result.returncode}, pool commands {'reached' if ran else 'not reached'}")
+        failed = True
+sys.exit(1 if failed else 0)
+EOF
+then :; else fail=1; fi
 
 echo "== net-verify: passive mode owns no active-probe resources =="
 NET_VERIFY="$TRACK_DIR/scripts/net-verify.sh"

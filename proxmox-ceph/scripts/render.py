@@ -342,8 +342,8 @@ def substitute(text, values, passed=None):
 # shipped /mnt/backup-cerberus is a lab path (its guard in
 # cerberus_require_vars is unchanged — this is audit coverage only).
 AUDITED_RE = re.compile(r"(_NET|_GW|_IP|_IPS)$|^(PBS_HOST_IP|DNS_SERVERS|NTP_SERVERS"
-                        r"|MAILTO|POOL_VM_TARGET_SIZE|POOL_VM_QUOTA_BYTES|XCC_USER"
-                        r"|PBS_DATASTORE_PATH)$")
+                        r"|MAILTO|POOL_VM_TARGET_SIZE|POOL_VM_QUOTA_BYTES"
+                        r"|POOL_CAPACITY_CEILING_BYTES|XCC_USER|PBS_DATASTORE_PATH)$")
 
 
 def audit_against_template(values, template_values):
