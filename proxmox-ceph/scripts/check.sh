@@ -551,6 +551,90 @@ else
     echo "FAIL active mode without nc produced a pass or unclear verdict (rc=$rc)"; fail=1
 fi
 
+echo "== OSD operations: resolved model and serial are verified =="
+if python3 - "$TRACK_DIR/runbook/03-ceph/README.md" "$TMP" <<'EOF'
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import textwrap
+
+runbook = Path(sys.argv[1]).read_text()
+tmp = Path(sys.argv[2])
+blocks = re.findall(r"```bash\n(.*?)```", runbook, re.S)
+operations = {
+    "create": "pveceph osd create",
+    "wipe": "ceph-volume lvm zap",
+}
+failed = False
+for name, operation in operations.items():
+    matches = [block for block in blocks if operation in block]
+    guard = None
+    if len(matches) == 1:
+        guard = re.search(r"(?ms)^[ \t]*model=.*?(?=^[ \t]*read -rp)", matches[0])
+    if guard is None:
+        print(f"FAIL {name} block has no extractable model/serial guard")
+        failed = True
+        continue
+    guard_text = textwrap.dedent(guard.group(0))
+    op_line = next(line.strip() for line in matches[0].splitlines() if operation in line)
+    case_dir = tmp / ("osd-" + name)
+    bin_dir = case_dir / "bin"
+    bin_dir.mkdir(parents=True)
+    script = case_dir / "harness"
+    script.write_text(
+        "set -euo pipefail\n"
+        "real=/dev/nvme-test\n"
+        "dev=/dev/disk/by-id/nvme-SAMSUNG_SERIAL1\n"
+        + guard_text
+        + op_line
+        + "\n"
+    )
+    lsblk = bin_dir / "lsblk"
+    lsblk.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, sys\n"
+        "print(os.environ.get('TEST_' + sys.argv[2], ''))\n"
+    )
+    lsblk.chmod(0o755)
+    op_path = bin_dir / operation.split()[0]
+    op_path.write_text(
+        "#!/bin/sh\n"
+        "printf '%s %s\\n' '${0##*/}' \"$*\" >> \"$TEST_OPERATION_LOG\"\n"
+    )
+    op_path.chmod(0o755)
+    cases = (
+        ("match", "SAMSUNG PM1743", "SERIAL1", True),
+        ("model-mismatch", "OTHER NVME", "SERIAL1", False),
+        ("serial-mismatch", "SAMSUNG PM1743", "OTHER", False),
+    )
+    for case, model, serial, should_run in cases:
+        log = case_dir / (case + ".log")
+        log.write_text("")
+        env = os.environ.copy()
+        env.update(
+            PATH=str(bin_dir) + os.pathsep + env["PATH"],
+            TEST_MODEL=model,
+            TEST_SERIAL=serial,
+            TEST_OPERATION_LOG=str(log),
+        )
+        result = subprocess.run(
+            ["bash", str(script)], env=env, capture_output=True, text=True
+        )
+        ran = bool(log.read_text())
+        if result.returncode == 0 and ran if should_run else result.returncode != 0 and not ran:
+            print(f"OK   {name} {case}: destructive command {'reached' if ran else 'not reached'}")
+        else:
+            print(
+                f"FAIL {name} {case}: rc={result.returncode}, "
+                f"destructive command {'reached' if ran else 'not reached'}"
+            )
+            failed = True
+sys.exit(1 if failed else 0)
+EOF
+then :; else fail=1; fi
+
 echo "== preflight: storcli status and output are fail-closed =="
 mkdir -p "$TMP/preflightbin" "$TMP/empty-byid" "$TMP/empty-sysfs"
 cat > "$TMP/preflightbin/pveversion" <<'STUB'

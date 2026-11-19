@@ -127,6 +127,11 @@ On **each node, for its own drives** — the block picks this node's two variabl
     size=$(lsblk -bdno SIZE "$real")
     [ "$size" -ge 3500000000000 ] && [ "$size" -le 4000000000000 ] \
       || { echo "FATAL: $real is $size bytes — not a 3.84 TB PM1743" >&2; exit 1; }
+    model="$(lsblk -dno MODEL "$real" | xargs)"
+    serial="$(lsblk -dno SERIAL "$real" | xargs)"
+    case "$model" in *PM1743*) ;; *) echo "FATAL: $real model is $model, not PM1743" >&2; exit 1 ;; esac
+    [ -n "$serial" ] && case "${dev##*/}" in *_"$serial") true ;; *) false ;; esac \
+      || { echo "FATAL: $dev does not carry the resolved drive serial $serial" >&2; exit 1; }
     read -rp "Create an OSD on $dev ($real) — DESTROYS its contents? [yes/NO] " ans
     [ "$ans" = "yes" ] || { echo "Stopped before $dev."; exit 1; }
     pveceph osd create "$dev"
@@ -149,6 +154,11 @@ Repeat on **node-2** and **node-3** (six OSDs total).
   cerberus_require_vars "$WIPE_VAR"
   dev="${!WIPE_VAR}"; real="$(readlink -f "$dev")"
   lsblk -o NAME,MODEL,SERIAL,SIZE,FSTYPE,MOUNTPOINTS "$real"
+  model="$(lsblk -dno MODEL "$real" | xargs)"
+  serial="$(lsblk -dno SERIAL "$real" | xargs)"
+  case "$model" in *PM1743*) ;; *) echo "FATAL: $real model is $model, not PM1743" >&2; exit 1 ;; esac
+  [ -n "$serial" ] && case "${dev##*/}" in *_"$serial") true ;; *) false ;; esac \
+    || { echo "FATAL: $dev does not carry the resolved drive serial $serial" >&2; exit 1; }
   grep -q "^$real" < <(findmnt -rno SOURCE) && { echo "FATAL: $real (or a partition) is mounted" >&2; exit 1; }
   read -rp "WIPE $dev ($real) — all data and LVM on it destroyed? [yes/NO] " ans
   [ "$ans" = "yes" ] || { echo "Not wiped."; exit 1; }
