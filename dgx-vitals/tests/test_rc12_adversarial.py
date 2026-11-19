@@ -83,5 +83,41 @@ class SSHDestinationValidation(unittest.TestCase):
         self.assertFalse(os.path.exists(out))
 
 
+class OutputPathContainment(unittest.TestCase):
+
+    def setUp(self):
+        self.vit = S.load_vitals()
+        self.tmp = S.tempdir(self)
+
+    def test_hostnames_cannot_escape_output_root(self):
+        hostile = [os.path.join(self.tmp, "absolute-escape"), "../escape",
+                   "a/b", r"a\b", ".", ".."]
+        for name in hostile:
+            out = os.path.join(self.tmp, "out-" + str(len(os.listdir(self.tmp))))
+            with self.subTest(name=name):
+                rc, _stdout, stderr = S.run_vitals_main(self.vit, [
+                    "--host", name, "--dry-run", "--out", out])
+                self.assertEqual(rc, 1)
+                self.assertIn("unsafe hostname", stderr)
+                self.assertFalse(os.path.exists(out))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "absolute-escape")))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "escape")))
+
+    def test_ordinary_hostname_still_dry_runs(self):
+        out = os.path.join(self.tmp, "Results")
+        rc, _stdout, _stderr = S.run_vitals_main(self.vit, [
+            "--host", "gpu01.example.com", "--dry-run", "--out", out])
+        self.assertEqual(rc, 0)
+        self.assertTrue(os.path.isfile(os.path.join(
+            out, "dry-run", "gpu01.example.com",
+            "gpu01.example.com-FULLLOG.txt")))
+
+    def test_run_host_also_enforces_containment(self):
+        out = os.path.join(self.tmp, "Results")
+        with self.assertRaises(self.vit.HostsFileError):
+            self.vit.run_host("../escape", S.FakeRunner(), out, [], None)
+        self.assertFalse(os.path.exists(out))
+
+
 if __name__ == "__main__":
     unittest.main()
