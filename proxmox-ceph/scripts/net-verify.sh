@@ -128,7 +128,7 @@ done
 echo ""
 echo "--- [2] corosync UDP 5405-5412 reachability (link0 mgmt + link1 public) ---"
 if ! command -v nc >/dev/null 2>&1; then
-  warn "[2] 'nc' (netcat) not installed — cannot probe UDP. Install netcat and re-run, or verify corosync links after cluster join."
+  fail "[2] 'nc' (netcat) not installed — cannot probe UDP. Install netcat and re-run; the UDP checks did not execute."
 else
   for target in "${MGMT_IPS[@]}" "${PUBLIC_IPS[@]}"; do
     if echo "$LOCAL_IPS" | grep -qw "$target"; then
