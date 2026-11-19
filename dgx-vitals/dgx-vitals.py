@@ -1532,6 +1532,14 @@ def _legacy_expect(steps, expected_gpus, nccl_required, platform_note):
             "platform_note": platform_note}
 
 
+def validate_artifact_name(name):
+    if (not name or name in (".", "..") or name.startswith("-")
+            or "/" in name or "\\" in name or ".." in name
+            or os.path.isabs(name) or any(ord(c) < 32 for c in name)):
+        raise HostsFileError(f"unsafe hostname for output path: {name!r}")
+    return name
+
+
 def run_host(hostname, runner, out_root, steps, expected_gpus,
              sudo_password=None, force=False, nccl_min_busbw=0.0, tail=False,
              nccl_required=False, platform_note="", plan=None, entry=None):
@@ -1541,7 +1549,11 @@ def run_host(hostname, runner, out_root, steps, expected_gpus,
     NCCL requirement. Without a plan, `steps` / `expected_gpus` are used
     as given. `entry` is the hosts-data entry identity is checked
     against (default: just the hostname)."""
-    host_dir = os.path.join(out_root, hostname)
+    validate_artifact_name(hostname)
+    root = os.path.realpath(out_root)
+    host_dir = os.path.realpath(os.path.join(root, hostname))
+    if os.path.commonpath([root, host_dir]) != root:
+        raise HostsFileError(f"hostname escapes output root: {hostname!r}")
     os.makedirs(host_dir, exist_ok=True)
     fulllog_path = os.path.join(host_dir, f"{hostname}-FULLLOG.txt")
     dry = getattr(runner, "dry", False)
@@ -2433,6 +2445,7 @@ def main():
     if not args.local:
         try:
             for e in entries:
+                validate_artifact_name(e["name"])
                 _ssh_value(e["address"], "address")
                 if args.user or e["user"]:
                     _ssh_value(args.user or e["user"], "user")
