@@ -827,14 +827,21 @@ class LocalRunner:
         shutil.copyfile(remote_path, dest_path)
 
 
+def _ssh_value(value, field):
+    if not value or value.startswith("-") or any(
+            c.isspace() or ord(c) < 32 for c in value):
+        raise ValueError(f"unsafe SSH {field}: {value!r}")
+    return value
+
+
 class SSHRunner:
     name = "ssh"
     dry = False
 
     def __init__(self, address, user=None, batch=True):
-        self.address = address
-        self.user = user
-        self.target = f"{user}@{address}" if user else address
+        self.address = _ssh_value(address, "address")
+        self.user = _ssh_value(user, "user") if user else None
+        self.target = f"{self.user}@{self.address}" if self.user else self.address
         self.batch = batch
         self.opts = ["-o", "ConnectTimeout=15",
                      "-o", "StrictHostKeyChecking=accept-new"]
@@ -856,7 +863,7 @@ class SSHRunner:
             # sshd starts the remote shell as a session (and process
             # group) leader, so its $$ is the step's process-group id.
             line = f"echo {PGID_MARK}$$; exec {line}"
-        cmd = ["ssh"] + self.opts + [self.target, line]
+        cmd = ["ssh"] + self.opts + ["--", self.target, line]
         # In batch mode the ssh client runs in its own session, so the
         # operator's Ctrl-C reaches only this runner, never the step's
         # ssh: an interrupt is recorded as an interrupt, not as a step
@@ -866,7 +873,7 @@ class SSHRunner:
                      new_session=self.batch, interruptible=track)
 
     def fetch(self, remote_path, dest_path):
-        cmd = ["scp"] + self.opts + [f"{self.target}:{remote_path}", dest_path]
+        cmd = ["scp"] + self.opts + ["--", f"{self.target}:{remote_path}", dest_path]
         rc, _, err = _exec(cmd, 120, None)
         if rc != 0:
             raise OSError(f"scp failed for {remote_path}: {err.strip()}")
@@ -1880,13 +1887,21 @@ def read_host_entries(path):
                                      f"'{gpus}' is not a positive integer")
             gpus = int(gpus)
         given = get("address")
+        address = given or get("lan_ip") or name
+        user = get("user") or None
+        try:
+            _ssh_value(address, "address")
+            if user:
+                _ssh_value(user, "user")
+        except ValueError as e:
+            raise HostsFileError(f"{path}: row {n} ({name}): {e}") from e
         entries.append({"name": name,
                         # SSH connects to the address column, else the
                         # fleet list's LAN IP, else the name itself
-                        "address": given or get("lan_ip") or name,
+                        "address": address,
                         "address_given": given,
                         "lan_ip": get("lan_ip"), "bmc_ip": get("bmc_ip"),
-                        "user": get("user") or None, "gpus": gpus or None,
+                        "user": user, "gpus": gpus or None,
                         "nvlink": get("nvlink") or None,
                         "serial": get("serial") or None})
     return entries
@@ -2415,6 +2430,15 @@ def main():
     if not entries:
         print("No hosts to validate (empty hosts file?).", file=sys.stderr)
         return 1
+    if not args.local:
+        try:
+            for e in entries:
+                _ssh_value(e["address"], "address")
+                if args.user or e["user"]:
+                    _ssh_value(args.user or e["user"], "user")
+        except ValueError as e:
+            print(f"hosts: {e}", file=sys.stderr)
+            return 1
     jobs = []  # (hostname, runner, description)
     for e in entries:
         if args.local:
