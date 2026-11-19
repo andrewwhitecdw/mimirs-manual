@@ -512,4 +512,68 @@ else
     echo "FAIL missing nc produced a pass or unclear verdict (rc=$rc)"; fail=1
 fi
 
+echo "== preflight: storcli status and output are fail-closed =="
+mkdir -p "$TMP/preflightbin" "$TMP/empty-byid" "$TMP/empty-sysfs"
+cat > "$TMP/preflightbin/pveversion" <<'STUB'
+#!/bin/sh
+echo 'pve-manager/9.0.0'
+STUB
+cat > "$TMP/preflightbin/getent" <<'STUB'
+#!/bin/sh
+echo '192.0.2.1 test-node'
+STUB
+cat > "$TMP/preflightbin/timedatectl" <<'STUB'
+#!/bin/sh
+echo 'NTPSynchronized=yes'
+STUB
+cat > "$TMP/preflightbin/ceph" <<'STUB'
+#!/bin/sh
+exit 1
+STUB
+cat > "$TMP/preflightbin/storcli" <<'STUB'
+#!/bin/sh
+case "${STORCLI_MODE:-error}" in
+  error) echo 'permission denied'; exit 1 ;;
+  empty) printf 'Controller = 0\nStatus = Success\nDescription = No Virtual Drives Found\n'; exit 0 ;;
+  one) printf 'Controller = 0\nStatus = Success\n0/0 RAID0 Optimal\n'; exit 0 ;;
+  unrecognized) echo 'unexpected successful response'; exit 0 ;;
+esac
+STUB
+chmod +x "$TMP/preflightbin/"*
+run_storcli_case() {
+    set +e
+    STORCLI_MODE="$1" PATH="$TMP/preflightbin:/usr/bin:/bin" \
+        CERBERUS_TEST_BYID_DIR="$TMP/empty-byid" \
+        CERBERUS_TEST_SYSFS="$TMP/empty-sysfs" \
+        bash "$TRACK_DIR/scripts/preflight.sh" --vars "$TMP/net-vars.sh" \
+        >"$TMP/preflight-$1.out" 2>&1
+    set -e
+}
+run_storcli_case error
+if grep -q 'FAIL: \[7\].*exited 1' "$TMP/preflight-error.out" \
+   && ! grep -q 'PASS: \[7\]' "$TMP/preflight-error.out"; then
+    echo "OK   storcli exit 1 cannot pass section 7"
+else
+    echo "FAIL storcli exit 1 was not reported as a section-7 failure"; fail=1
+fi
+run_storcli_case empty
+if grep -q 'PASS: \[7\].*no virtual drives' "$TMP/preflight-empty.out"; then
+    echo "OK   recognizable successful no-VD output passes section 7"
+else
+    echo "FAIL recognizable successful no-VD output did not pass section 7"; fail=1
+fi
+run_storcli_case one
+if grep -q 'FAIL: \[7\].*1 virtual drive' "$TMP/preflight-one.out"; then
+    echo "OK   a reported virtual drive fails section 7"
+else
+    echo "FAIL a reported virtual drive did not fail section 7"; fail=1
+fi
+run_storcli_case unrecognized
+if grep -q 'FAIL: \[7\].*unrecognized' "$TMP/preflight-unrecognized.out" \
+   && ! grep -q 'PASS: \[7\]' "$TMP/preflight-unrecognized.out"; then
+    echo "OK   unrecognized storcli output fails section 7"
+else
+    echo "FAIL unrecognized storcli output was accepted"; fail=1
+fi
+
 if [ "$fail" -eq 0 ]; then echo "ALL CHECKS PASSED"; else echo "CHECKS FAILED"; exit 1; fi
