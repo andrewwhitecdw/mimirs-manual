@@ -1,6 +1,6 @@
 """B1 / P1 — KI-2 is narrowed to its failure signature. A recorded NCCL
 failure with real run evidence can never be relabelled by note text; the
-genuine not-provisioned case (field corpus) still reads Skipped.
+documented not-provisioned field case still reads Skipped.
 
 Signature (tracker_build.ki2_applies): NCCL state Failed; the NCCL step's
 own FULLLOG trailer note carries the runner's "not installed: ...

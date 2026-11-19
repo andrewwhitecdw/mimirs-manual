@@ -672,7 +672,7 @@ class ScriptedRunner:
 
 def corpus_block(case, host, cmd_prefix):
     """The output body of the FULLLOG block whose command starts with
-    cmd_prefix (real field output, prefix-scrubbed; see PROVENANCE.md)."""
+    cmd_prefix (field or labeled synthetic evidence; see PROVENANCE.md)."""
     text = read_fixture(case, host, f"{host}-FULLLOG.txt")
     lines = text.splitlines()
     for i, ln in enumerate(lines):
@@ -691,7 +691,7 @@ W09 = ("wave1-w09-full-pass", "fx-w09-prod-hv-01")
 
 
 def healthy_health_block():
-    """The real w09 `nvsm show health` output with its one Unhealthy
+    """The retained w09 `nvsm show health` output with its one Unhealthy
     check (the DIMM part number) flipped to Healthy and the summary
     counts made consistent — what a clean host prints."""
     t = corpus_block(*W09, "sudo nvsm show health")

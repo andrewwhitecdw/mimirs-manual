@@ -68,11 +68,11 @@ tracks stand the machines up; Vitals proves they're healthy. **BCM 08.6
 runs it, and the 11.3 handoff gates on its verdicts.**
 
 **Provenance.** The tool's source of truth is its own repo (`dgx-vitals`).
-The copy here is an assembly of it: byte-identical to canonical commit
-`01fb620` (VERSION 2.0), leaving out only the canonical repo's `tests/`
-and `.gitattributes`. `dgx-vitals/README.md` is the tool's own README and
-says nothing about this library — this paragraph is the provenance
-record. Start with the tool's two entry points:
+The copy here is based on the canonical VERSION 2.0 sources and includes
+its tests and `.gitattributes`. Synthetic parser fixtures are identified
+in [`dgx-vitals/tests/fixtures/corpus/PROVENANCE.md`](dgx-vitals/tests/fixtures/corpus/PROVENANCE.md).
+`dgx-vitals/README.md` is the tool's own README and says nothing about
+this library — this paragraph is the provenance record. Start with the tool's two entry points:
 [`dgx-vitals/QUICKSTART.md`](dgx-vitals/QUICKSTART.md) (first run) and
 [`dgx-vitals/docs/OPERATORS-GUIDE.md`](dgx-vitals/docs/OPERATORS-GUIDE.md)
 (the full guide).

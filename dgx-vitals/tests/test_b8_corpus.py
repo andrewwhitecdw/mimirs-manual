@@ -1,7 +1,6 @@
-"""B8 — fixture suite from the real field corpus. Each case names the
-corpus file it derives from (see tests/fixtures/corpus/PROVENANCE.md for
-paths and sha256) and states its expected verdict. Hostnames carry the
-fixture prefix fx- in place of the site prefix."""
+"""B8 — fixture suite from retained field evidence and labeled synthetic
+FULLLOG replacements. See tests/fixtures/corpus/PROVENANCE.md for the two
+provenance classes. Hostnames carry the fixture prefix fx-."""
 
 import os
 import shutil
@@ -18,6 +17,24 @@ class CorpusCases(unittest.TestCase):
     def _vitals(self, case, **kw):
         root = S.corpus_root(case, os.path.join(self.tmp, case), **kw)
         return S.run_tracker(["--vitals", root], self.tmp)
+
+    def test_required_fulllogs_are_tracked(self):
+        cases = {
+            "full-w08-hollow-stress": ["fx-w08-prod-hv-01"],
+            "wave1-w08-already-running": ["fx-w08-prod-hv-01"],
+            "wave1-w09-full-pass": ["fx-w09-prod-hv-01"],
+            "wave1-x10-ki2": ["fx-x10-prod-hv-01"],
+            "xwave2-no-summary": ["fx-x01-prod-hv-02", "fx-x01-prod-hv-04"],
+            "y10-truncated": ["fx-y10-prod-hv-02"],
+        }
+        missing = []
+        for case, hosts in cases.items():
+            for host in hosts:
+                path = os.path.join(S.FIXTURES, case, host,
+                                    f"{host}-FULLLOG.txt")
+                if not os.path.isfile(path):
+                    missing.append(os.path.relpath(path, S.FIXTURES))
+        self.assertEqual(missing, [])
 
     def test_hollow_stress_pass_w08_full(self):
         # corpus: validation-output-full/nesd-oma01c-w08-prod-hv-01 (v1.4).
