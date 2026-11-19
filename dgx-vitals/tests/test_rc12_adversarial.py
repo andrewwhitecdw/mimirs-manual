@@ -141,5 +141,22 @@ class DuplicateHosts(unittest.TestCase):
         self.assertFalse(os.path.exists(out))
 
 
+class SpreadsheetFormulaSafety(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = S.tempdir(self)
+
+    def test_formula_leading_text_is_literal_in_csv_and_xlsx(self):
+        for i, host in enumerate(("=1+1", "+cmd", "-cmd", "@cmd", "\tcmd", "\rcmd")):
+            with self.subTest(host=host):
+                root = S.write_vitals_root(os.path.join(self.tmp, f"r{i}"),
+                                           [S.full_dgx(host)])
+                sh = S.run_tracker(["--vitals", root], self.tmp, f"t{i}.xlsx")
+                safe = "'" + host
+                self.assertEqual(sh.get(safe, "Node Hostname"), safe)
+                self.assertEqual(sh.csv_row(safe)["Node Hostname"], safe)
+                self.assertEqual(sh.get(safe, "% Complete"), 100)
+
+
 if __name__ == "__main__":
     unittest.main()
