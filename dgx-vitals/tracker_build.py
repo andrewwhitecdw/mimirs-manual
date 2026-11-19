@@ -1893,6 +1893,12 @@ def prepare_cards(order, hosts, out_path, raw_cards=False):
     return n
 
 
+def spreadsheet_text(value):
+    if isinstance(value, str) and value.startswith(("=", "+", "-", "@", "\t", "\r")):
+        return "'" + value
+    return value
+
+
 def table_rows(order, hosts):
     """The data rows exactly as both the sheet and the CSV carry them."""
     rows = []
@@ -1903,7 +1909,7 @@ def table_rows(order, hosts):
         row += [r.pct if r.pct is not None else "", r.overall, r.nccl,
                 r.source or "—", " + ".join(r.provenance) or "—",
                 row_notes(r), ""]
-        rows.append(row)
+        rows.append([spreadsheet_text(value) for value in row])
     return rows
 
 
@@ -1914,7 +1920,7 @@ def quarantine_rows(ingest):
         row += [""] * len(TRACKER_STEPS)
         row += ["", "QUARANTINED", "", q["source"], q["provenance"],
                 q["reason"], ""]
-        out.append(row)
+        out.append([spreadsheet_text(value) for value in row])
     return out
 
 
@@ -1927,8 +1933,8 @@ def write_csv(path, order, hosts, ingest=None):
         w.writerow(COLUMNS)
         for name, row in zip(order, table_rows(order, hosts)):
             r = hosts[name]
-            w.writerow(row[:-1] + [card_ref(getattr(r, "embed_path", None)
-                                            or r.card_path)])
+            w.writerow(row[:-1] + [spreadsheet_text(
+                card_ref(getattr(r, "embed_path", None) or r.card_path))])
         for row in quarantine_rows(ingest):
             w.writerow(row)
 
@@ -1968,7 +1974,7 @@ def build_sheet(order, hosts, out_path, title, adj_report=None,
     unr_font = Font(bold=True, color="843C0C")
     dim_font = Font(color="808080", italic=True)
 
-    ws.append([title] if title else ["Validation Tracker"])
+    ws.append([spreadsheet_text(title)] if title else ["Validation Tracker"])
     ws.merge_cells(start_row=1, start_column=1, end_row=1,
                    end_column=len(COLUMNS))
     ws.cell(row=1, column=1).font = Font(bold=True, size=13, color="1F4E79")
@@ -2036,7 +2042,7 @@ def build_sheet(order, hosts, out_path, title, adj_report=None,
         ws.cell(row=hr, column=1).font = Font(bold=True, size=12,
                                               color="1F4E79")
         for text in lines:
-            ws.append([text])
+            ws.append([spreadsheet_text(text)])
             rn = ws.max_row
             ws.merge_cells(start_row=rn, start_column=1, end_row=rn,
                            end_column=len(COLUMNS))
