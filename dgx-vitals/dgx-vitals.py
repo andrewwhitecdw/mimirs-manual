@@ -1861,7 +1861,7 @@ def read_host_entries(path):
     such column (e.g. "Node Hostname") is refused, never read as zero
     hosts or as a host. Blank lines and #-comments are ignored. Opened
     as utf-8-sig so a file saved by Excel doesn't corrupt the first
-    hostname."""
+    hostname. Duplicate hostnames are refused before any jobs start."""
     entries = []
     with open(path, newline="", encoding="utf-8-sig") as f:
         lines = [ln for ln in f if ln.strip() and not ln.lstrip().startswith("#")]
@@ -1885,6 +1885,7 @@ def read_host_entries(path):
         idx = {k: None for k in HOSTS_COLUMNS}
         idx.update({"hostname": 0, "address": 1, "user": 2})
         data = rows
+    seen_names = set()
     for n, row in enumerate(data, 2 if has_header else 1):
         def get(k):
             i = idx[k]
@@ -1892,6 +1893,9 @@ def read_host_entries(path):
         name = get("hostname")
         if not name:
             continue
+        if name in seen_names:
+            raise HostsFileError(f"{path}: row {n}: duplicate hostname {name!r}")
+        seen_names.add(name)
         gpus = get("gpus")
         if gpus:
             if not gpus.isdigit() or int(gpus) < 1:

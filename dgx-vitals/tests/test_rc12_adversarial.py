@@ -119,5 +119,27 @@ class OutputPathContainment(unittest.TestCase):
         self.assertFalse(os.path.exists(out))
 
 
+class DuplicateHosts(unittest.TestCase):
+
+    def setUp(self):
+        self.vit = S.load_vitals()
+        self.tmp = S.tempdir(self)
+        self.hosts = os.path.join(self.tmp, "hosts.csv")
+        with open(self.hosts, "w") as f:
+            f.write("hostname,address\ngpu01,192.0.2.1\ngpu01,192.0.2.2\n")
+
+    def test_parser_rejects_duplicate_hostname(self):
+        with self.assertRaisesRegex(self.vit.HostsFileError, "duplicate hostname"):
+            self.vit.read_host_entries(self.hosts)
+
+    def test_main_creates_no_jobs_or_evidence_for_duplicates(self):
+        out = os.path.join(self.tmp, "Results")
+        rc, _stdout, stderr = S.run_vitals_main(self.vit, [
+            "--hosts", self.hosts, "--dry-run", "--out", out])
+        self.assertEqual(rc, 1)
+        self.assertIn("duplicate hostname", stderr)
+        self.assertFalse(os.path.exists(out))
+
+
 if __name__ == "__main__":
     unittest.main()
