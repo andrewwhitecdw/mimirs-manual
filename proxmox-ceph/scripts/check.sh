@@ -383,6 +383,30 @@ sys.exit(1 if (local & set(v)) or "CLUSTER_NAME" not in v else 0)' \
     else
         echo "FAIL --force guard (rc=$rc)"; fail=1
     fi
+    mkdir -p "$TMP/forged"
+    printf '%s\n' 'written by proxmox-ceph/scripts/render.py; --force may replace this directory' \
+        > "$TMP/forged/.cerberus-render"
+    : > "$TMP/forged/precious.txt"
+    set +e
+    "$TRACK_DIR/scripts/render.py" --vars "$TEMPLATE" --out "$TMP/forged" --force >/dev/null 2>&1
+    forged_rc=$?
+    set -e
+    if [ "$forged_rc" -ne 0 ] && [ -f "$TMP/forged/precious.txt" ]; then
+        echo "OK   --force refuses a forged legacy marker and preserves foreign files"
+    else
+        echo "FAIL forged legacy marker authorized replacement"; fail=1
+    fi
+    : > "$TMP/out/precious.txt"
+    set +e
+    "$TRACK_DIR/scripts/render.py" --vars "$TEMPLATE" --out "$TMP/out" --force >/dev/null 2>&1
+    extra_rc=$?
+    set -e
+    if [ "$extra_rc" -ne 0 ] && [ -f "$TMP/out/precious.txt" ]; then
+        echo "OK   --force refuses an extra file and leaves it untouched"
+    else
+        echo "FAIL an extra file was recursively deleted"; fail=1
+    fi
+    rm -f "$TMP/out/precious.txt"
 else
     echo "FAIL render.py"; fail=1
 fi

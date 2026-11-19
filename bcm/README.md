@@ -109,8 +109,10 @@ scripts/runbook.py render --out site-docs/bcm/     # reads site-vars.sh
 
 The template docs are never modified; render writes a fresh directory
 every time: an existing `--out` is refused, and `--force` replaces only a
-directory a previous render wrote (it carries a `.bcm-render` marker) —
-never an arbitrary one. Links resolve inside the rendered guide: the
+directory whose `.bcm-render` JSON manifest and exact file inventory match
+a complete previous render. Missing or extra files, symlinks, unsafe
+paths, and legacy text markers are refused without deletion. Links resolve
+inside the rendered guide: the
 README's diagrams are copied into its `diagrams/`, links between
 sections stay links, and links to library files that are not part of
 the deliverable (the variables template, `99-role-mapping.md`) become

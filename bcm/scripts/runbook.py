@@ -44,6 +44,7 @@ Python 3.12 stock on Ubuntu 24.04 / DGX OS — stdlib only.
 """
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -1111,6 +1112,74 @@ def credential_tripwire(vars_, environ):
 
 
 RENDER_MARKER = ".bcm-render"
+
+
+def _manifest_output_path(out, rel):
+    if not isinstance(rel, str) or not rel or rel == RENDER_MARKER \
+            or rel.startswith("/") or "\\" in rel:
+        raise ValueError(f"unsafe manifest path: {rel!r}")
+    parts = rel.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        raise ValueError(f"unsafe manifest path: {rel!r}")
+    root = os.path.abspath(out)
+    path = os.path.join(root, *parts)
+    if os.path.commonpath((root, os.path.abspath(path))) != root:
+        raise ValueError(f"manifest path escapes output: {rel!r}")
+    current = root
+    for part in parts:
+        current = os.path.join(current, part)
+        if os.path.islink(current):
+            raise ValueError(f"render output contains a symlink: {rel}")
+    if not os.path.isfile(path):
+        raise ValueError(f"manifest file is missing or not regular: {rel}")
+    return path
+
+
+def _remove_previous_render(out):
+    if os.path.islink(out) or not os.path.isdir(out):
+        raise ValueError("output is not a real directory")
+    out = os.path.abspath(out)
+    marker_path = os.path.join(out, RENDER_MARKER)
+    if os.path.islink(marker_path) or not os.path.isfile(marker_path):
+        raise ValueError(f"no regular {RENDER_MARKER} manifest")
+    with open(marker_path, encoding="utf-8") as f:
+        document = json.load(f)
+    if not isinstance(document, dict) \
+            or type(document.get("version")) is not int \
+            or document["version"] != 1 \
+            or not isinstance(document.get("files"), list):
+        raise ValueError("legacy or invalid render manifest")
+    files = document["files"]
+    if any(not isinstance(rel, str) for rel in files):
+        raise ValueError("non-string manifest path")
+    if len(set(files)) != len(files):
+        raise ValueError("duplicate manifest paths")
+    owned = {_manifest_output_path(out, rel) for rel in files}
+    actual = set()
+    for current, dirs, names in os.walk(out, followlinks=False):
+        for name in dirs + names:
+            if os.path.islink(os.path.join(current, name)):
+                raise ValueError("render output contains a symlink")
+        for name in names:
+            actual.add(os.path.join(current, name))
+    expected = owned | {marker_path}
+    if actual != expected:
+        raise ValueError("render output has missing or extra files")
+    for path in sorted(owned):
+        os.unlink(path)
+    os.unlink(marker_path)
+    for current, dirs, _names in os.walk(out, topdown=False):
+        for name in dirs:
+            os.rmdir(os.path.join(current, name))
+    os.rmdir(out)
+
+
+def _write_render_manifest(out, files):
+    with open(os.path.join(out, RENDER_MARKER), "w", encoding="utf-8") as f:
+        json.dump({"version": 1, "files": sorted(files)}, f, indent=2)
+        f.write("\n")
+
+
 _IMAGE_EXT = (".svg", ".png", ".jpg", ".jpeg", ".gif")
 _LINK_RE = re.compile(r"(!?)\[([^\]]*)\]\(([^)\s]+)\)")
 
@@ -1188,22 +1257,20 @@ def pass_render(vars_, args):
         print("!! NAME). Nothing was written.", file=sys.stderr)
         print(bar, file=sys.stderr)
         sys.exit(3)
-    # L2: a fresh directory every time. An existing --out is refused;
-    # --force replaces it only when a previous render wrote it (marker),
-    # never an arbitrary directory.
-    if os.path.exists(out):
+    # L2: a fresh directory every time. --force verifies the previous
+    # render's complete file manifest before removing only those files.
+    if os.path.lexists(out):
         if not args.force:
             print(f"REFUSED: {out} exists — render writes a fresh directory "
                   f"(--force replaces a previous render's output)", file=sys.stderr)
             sys.exit(2)
-        if not os.path.isfile(os.path.join(out, RENDER_MARKER)):
-            print(f"REFUSED: {out} was not written by runbook.py render (no "
-                  f"{RENDER_MARKER} marker) — choose a fresh --out", file=sys.stderr)
+        try:
+            _remove_previous_render(out)
+        except (OSError, ValueError) as e:
+            print(f"REFUSED: cannot verify {out} as a complete previous render: "
+                  f"{e} — choose a fresh --out", file=sys.stderr)
             sys.exit(2)
-        shutil.rmtree(out)
     os.makedirs(out)
-    with open(os.path.join(out, RENDER_MARKER), "w") as f:
-        f.write("written by bcm/scripts/runbook.py render; --force may replace this directory\n")
     vals = _expand_vars(vars_)
     skip = {"99-role-mapping.md"}
     docs = [fn for fn in sorted(os.listdir(docs_dir))
@@ -1224,6 +1291,9 @@ def pass_render(vars_, args):
     for src, dst in sorted(copies.items()):
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copyfile(src, dst)
+    _write_render_manifest(
+        out, [os.path.relpath(path, os.path.abspath(out))
+              for path in list(targets.values()) + list(copies.values())])
     creds = sorted(k for k in vars_ if is_credential_class(k))
     unfilled = sorted(k for k, v in vals.items()
                       if "<" in v and ">" in v and k not in creds)
