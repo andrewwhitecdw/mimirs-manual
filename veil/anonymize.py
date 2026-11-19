@@ -304,10 +304,28 @@ def read_list_file(path):
     return out
 
 
+def input_symlinks(inputs):
+    found = []
+    for inp in inputs:
+        p = Path(inp)
+        if p.is_symlink():
+            found.append(p)
+        elif p.is_dir():
+            for f in p.rglob("*"):
+                rel = f.relative_to(p)
+                if any(part in VCS_DIRS for part in rel.parts):
+                    continue
+                if f.is_symlink():
+                    found.append(f)
+    return found
+
+
 def iter_files(inputs):
     """(path, rel) for every file under the inputs; .git dirs excluded."""
     for inp in inputs:
         p = Path(inp)
+        if p.is_symlink():
+            continue
         if p.is_file():
             yield p, p.name
         elif p.is_dir():
@@ -321,6 +339,8 @@ def iter_files(inputs):
                         noted.add(top)
                         print(f"SKIP {top}/: VCS metadata is never read or copied",
                               file=sys.stderr)
+                    continue
+                if f.is_symlink():
                     continue
                 if f.is_file():
                     yield f, relp.as_posix()
@@ -897,6 +917,11 @@ def main(argv=None):
     writing = bool(args.out) and not args.dry_run and not args.scan
     if not args.scan and not args.dry_run and not args.out:
         ap.error("need --out or --dry-run/--scan")
+    links = input_symlinks(args.inputs)
+    if links:
+        for link in links:
+            err(f"{link}: input symlinks are refused")
+        return 2
 
     # ---- client names (repeatable --client, comma-delimited accepted)
     clients = []

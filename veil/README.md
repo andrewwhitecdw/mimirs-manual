@@ -129,7 +129,7 @@ stderr (file, value class, line context) and the run exits non-zero.
 |---|---|
 | 0 | clean |
 | 1 | no input files, or an anonymized-filename collision (nothing written; `--scan` reports it too) |
-| 2 | usage error, or refused by a guard: `--out` is/inside an input, no client names for `--out`, client/vocabulary collision, a pre-existing output file differs, `--map` inside `--out`, default map path holds a different run's map |
+| 2 | usage error, or refused by a guard: an input is or contains a symlink, `--out` is/inside an input, no client names for `--out`, client/vocabulary collision, a pre-existing output file differs, `--map` inside `--out`, default map path holds a different run's map |
 | 3 | `LEAK` survivors found — do not publish |
 
 ## Warnings
@@ -151,6 +151,8 @@ stderr (file, value class, line context) and the run exits non-zero.
   that manifest by hand; the re-scan cannot see inside compressed or
   encoded content. `.git` directories are never read or copied.
 - `--scan` and `--dry-run` exist so you can verify before writing. Use them.
+- Input symlinks are refused, whether passed directly or found below an
+  input directory, so a bundle cannot read external content through a link.
 - Nothing is ever edited in place: `--out` may not be, or be inside, an
   input; no file or directory below `--out` may be a symlink, and every
   destination must resolve inside `--out` (`--out` itself may be a link to
