@@ -106,7 +106,9 @@ refuses an unset or placeholder secret (names only, never values).
 The node scripts (`preflight.sh`, `net-verify.sh`, `backup-drill.sh`) take
 `--vars FILE` like `render.py`; without it they read `site-vars.sh` at the
 track root, and if neither exists they stop. They never fall back to the
-template's defaults.
+template's defaults. `net-verify.sh` runs only MTU checks by default and
+exits 2 with `INCOMPLETE`; pass `--active-probes` to permit its owned,
+temporary UDP listeners and optional iperf3 servers on peer nodes.
 
 ## Working-directory contract (read before pasting anything)
 

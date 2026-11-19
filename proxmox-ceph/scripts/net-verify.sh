@@ -2,39 +2,43 @@
 # =====================================================================
 # Cerberus — scripts/net-verify.sh
 #
-# READ-ONLY network verification for the 3-node fabric.
+# Network verification for the 3-node fabric.
 # Run from ANY one of the PVE nodes (it reaches the others over SSH).
+# Default mode performs only MTU checks. Active probes are opt-in.
 #
 # Verifies:
 #   1. End-to-end MTU on the Ceph public + Ceph cluster networks
 #      (ping -M do with a 8972-byte payload => 9000-byte frames, DF set)
-#   2. corosync UDP port range 5405-5412 reachable between all nodes, on
-#      BOTH corosync networks: link0 (mgmt IPs) and link1 (Ceph public
-#      IPs — link1 is mandatory). Probe datagrams; needs nc/netcat.
+#   2. With --active-probes: corosync UDP port range 5405-5412 reachable
+#      between all nodes on BOTH corosync networks. Needs nc/netcat.
+#   3. With --active-probes: optional iperf3 bandwidth sanity on the 200G
+#      fabric (auto-skipped if missing; disable with --no-iperf3).
 #   4. PBS backup VLAN: MTU ${PBS_MTU} end to end from this node to the
-#      PBS host's VLAN address (PBS_VLAN_IP) — the path every backup and
-#      restore takes (H3).
-#   3. Optional: iperf3 bandwidth sanity on the 200G fabric (auto-skipped
-#      if iperf3 is missing on either end; disable with --no-iperf3)
+#      PBS host's VLAN address (PBS_VLAN_IP).
 #
-# Usage: bash scripts/net-verify.sh [--vars <path>] [--dry-run] [--no-iperf3]
-#   --dry-run:    print what would be tested, run nothing.
-#   --no-iperf3: skip the optional bandwidth test.
-#   --vars <path>: the site variables file (same convention as render.py).
+# Usage: bash scripts/net-verify.sh [--vars <path>] [--dry-run]
+#                                  [--active-probes] [--no-iperf3]
+#   --dry-run:       print what would be tested, run nothing.
+#   --active-probes: permit remote listeners, servers, and temporary files.
+#   --no-iperf3:     skip the optional bandwidth test in active mode.
+#   --vars <path>:   the site variables file (same convention as render.py).
 #              Default: <track>/site-vars.sh. If neither exists, the script
 #              exits 2 — it never sources the template variables.
-# Exit code: 0 if all pass; non-zero with a clear message on failure.
+# Exit code: 0 if all requested checks pass; 1 on failure; 2 for usage or
+# incomplete verification when --active-probes was not enabled.
 # =====================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 DRY_RUN=0
+ACTIVE_PROBES=0
 WITH_IPERF3=1
 VARS_FILE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=1; shift ;;
+    --active-probes) ACTIVE_PROBES=1; shift ;;
     --no-iperf3) WITH_IPERF3=0; shift ;;
     --vars) [ $# -ge 2 ] || { echo "--vars needs a path" >&2; exit 2; }; VARS_FILE="$2"; shift 2 ;;
     --vars=*) VARS_FILE="${1#--vars=}"; shift ;;
@@ -81,19 +85,28 @@ PBS_PAYLOAD=$(( PBS_MTU - 28 ))
 MTU_PAYLOAD=$(( CEPH_PUBLIC_MTU - 28 ))
 PROBE_PORT=5406   # inside 5405-5412, distinct from the live corosync port
 
-echo "=== Cerberus network verification (read-only) ==="
+if [ "$ACTIVE_PROBES" -eq 1 ]; then
+  echo "=== Cerberus network verification (active probes enabled) ==="
+else
+  echo "=== Cerberus network verification (read-only MTU checks) ==="
+fi
 echo "Local host: $(hostname)"
 echo "This script makes NO configuration changes. It will test:"
 echo "  [1] MTU ${CEPH_PUBLIC_MTU} end-to-end (DF ping, ${MTU_PAYLOAD}-byte payload)"
 echo "      public  : ${PUBLIC_IPS[*]}"
 echo "      cluster : ${CLUSTER_IPS[*]}"
-echo "  [2] corosync UDP reachability (5405-5412) on both links"
-echo "      link0 (mgmt IPs): ${MGMT_IPS[*]}"
-echo "      link1 (public IPs): ${PUBLIC_IPS[*]}"
-if [ "$WITH_IPERF3" -eq 1 ]; then
-  echo "  [3] iperf3 bandwidth sanity on the 200G fabric (optional; skipped if missing)"
+if [ "$ACTIVE_PROBES" -eq 1 ]; then
+  echo "  [2] corosync UDP reachability (5405-5412) on both links"
+  echo "      link0 (mgmt IPs): ${MGMT_IPS[*]}"
+  echo "      link1 (public IPs): ${PUBLIC_IPS[*]}"
+  if [ "$WITH_IPERF3" -eq 1 ]; then
+    echo "  [3] iperf3 bandwidth sanity on the 200G fabric (optional; skipped if missing)"
+  else
+    echo "  [3] iperf3 bandwidth test: DISABLED by --no-iperf3"
+  fi
 else
-  echo "  [3] iperf3 bandwidth test: DISABLED by --no-iperf3"
+  echo "  [2] corosync UDP reachability: SKIPPED (requires --active-probes)"
+  echo "  [3] iperf3 bandwidth sanity: SKIPPED (requires --active-probes)"
 fi
 echo "  [4] PBS backup VLAN: MTU ${PBS_MTU} (DF ping, ${PBS_PAYLOAD}-byte payload) to ${PBS_VLAN_IP}"
 echo ""
@@ -127,7 +140,9 @@ done
 # --- [2] corosync UDP reachability ----------------------------------------
 echo ""
 echo "--- [2] corosync UDP 5405-5412 reachability (link0 mgmt + link1 public) ---"
-if ! command -v nc >/dev/null 2>&1; then
+if [ "$ACTIVE_PROBES" -eq 0 ]; then
+  echo "  Skipped (requires --active-probes)."
+elif ! command -v nc >/dev/null 2>&1; then
   fail "[2] 'nc' (netcat) not installed — cannot probe UDP. Install netcat and re-run; the UDP checks did not execute."
 else
   for target in "${MGMT_IPS[@]}" "${PUBLIC_IPS[@]}"; do
@@ -135,17 +150,37 @@ else
       echo "  (skip $target — local address)"
       continue
     fi
-    # Listener on the target (background via ssh), probe from here, then check.
     ssh -o BatchMode=yes -o ConnectTimeout=5 "root@$target" \
-      "timeout 12 nc -u -l -p $PROBE_PORT > /tmp/cerberus-udp-probe 2>/dev/null & echo started" >/dev/null 2>&1 || true
+      "bash -s -- $PROBE_PORT" >/dev/null 2>&1 <<'REMOTE_UDP' &
+set -eu
+port="$1"
+dir="$(mktemp -d /tmp/cerberus-udp.XXXXXX)"
+timeout 12 nc -u -l -p "$port" >"$dir/received" 2>/dev/null &
+listener=$!
+cleanup() {
+  kill "$listener" >/dev/null 2>&1 || true
+  wait "$listener" 2>/dev/null || true
+  rm -f -- "$dir/received"
+  rmdir -- "$dir" 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+attempt=0
+while [ "$attempt" -lt 10 ]; do
+  if grep -q cerberus-udp-probe "$dir/received"; then
+    exit 0
+  fi
+  sleep 1
+  attempt=$((attempt + 1))
+done
+exit 1
+REMOTE_UDP
+    session=$!
     sleep 1
     echo "cerberus-udp-probe" | timeout 5 nc -u -w 2 "$target" "$PROBE_PORT" >/dev/null 2>&1 || true
-    sleep 2
-    if ssh -o BatchMode=yes -o ConnectTimeout=5 "root@$target" \
-        "grep -q cerberus-udp-probe /tmp/cerberus-udp-probe && rm -f /tmp/cerberus-udp-probe" 2>/dev/null; then
+    if wait "$session"; then
       pass "[2] UDP datagram reached $target (port $PROBE_PORT in range)"
     else
-      ssh -o BatchMode=yes -o ConnectTimeout=5 "root@$target" "rm -f /tmp/cerberus-udp-probe" 2>/dev/null || true
       fail "[2] UDP datagram did NOT reach $target on port $PROBE_PORT — corosync knet traffic may be filtered. Check firewalls/ACLs on the path."
     fi
   done
@@ -155,39 +190,52 @@ fi
 # --- [3] iperf3 bandwidth sanity (optional) --------------------------------
 echo ""
 echo "--- [3] iperf3 bandwidth sanity (optional) ---"
-if [ "$WITH_IPERF3" -eq 0 ]; then
+if [ "$ACTIVE_PROBES" -eq 0 ]; then
+  echo "  Skipped (requires --active-probes)."
+elif [ "$WITH_IPERF3" -eq 0 ]; then
   echo "  Skipped (--no-iperf3)."
+elif ! command -v iperf3 >/dev/null 2>&1; then
+  warn "[3] iperf3 not installed locally — skipping bandwidth test (install iperf3 to enable)."
 else
-  if ! command -v iperf3 >/dev/null 2>&1; then
-    warn "[3] iperf3 not installed locally — skipping bandwidth test (install iperf3 to enable)."
-  else
-    for target in "${PUBLIC_IPS[@]}"; do
-      if echo "$LOCAL_IPS" | grep -qw "$target"; then
-        echo "  (skip $target — local address)"
-        continue
-      fi
-      if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "root@$target" "command -v iperf3" >/dev/null 2>&1; then
-        warn "[3] iperf3 missing on $target — skipping that leg."
-        continue
-      fi
-      ssh -o BatchMode=yes "root@$target" "pkill -f 'iperf3 -s' >/dev/null 2>&1; iperf3 -s -D >/dev/null 2>&1" || true
-      sleep 1
-      RESULT="$(timeout 20 iperf3 -c "$target" -t 10 -f g 2>/dev/null | grep -E 'receiver' | tail -1 || true)"
-      ssh -o BatchMode=yes "root@$target" "pkill -f 'iperf3 -s' >/dev/null 2>&1" || true
-      GBPS="$(echo "$RESULT" | grep -oE '[0-9]+\.[0-9]+ Gbits/sec' | grep -oE '[0-9]+\.[0-9]+' | head -1 || true)"
-      if [ -n "${GBPS:-}" ]; then
-        # Sanity floor: 50 Gbits/sec (a quarter of a 200G leg — generous;
-        # iperf3 single-stream rarely saturates 200G). Below = investigate.
-        if awk "BEGIN{exit !($GBPS >= 50)}"; then
-          pass "[3] -> $target: ${GBPS} Gbits/sec (>= 50 floor OK)"
-        else
-          warn "[3] -> $target: ${GBPS} Gbits/sec is LOW for a 200G leg — check link negotiation, DAC seating, CPU affinity."
-        fi
+  for target in "${PUBLIC_IPS[@]}"; do
+    if echo "$LOCAL_IPS" | grep -qw "$target"; then
+      echo "  (skip $target — local address)"
+      continue
+    fi
+    if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "root@$target" "command -v iperf3" >/dev/null 2>&1; then
+      warn "[3] iperf3 missing on $target — skipping that leg."
+      continue
+    fi
+    ssh -o BatchMode=yes -o ConnectTimeout=5 "root@$target" \
+      "bash -s" >/dev/null 2>&1 <<'REMOTE_IPERF' &
+set -eu
+timeout 20 iperf3 -s -1 >/dev/null 2>&1 &
+server=$!
+cleanup() {
+  kill "$server" >/dev/null 2>&1 || true
+  wait "$server" 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+wait "$server"
+REMOTE_IPERF
+    session=$!
+    sleep 1
+    RESULT="$(timeout 20 iperf3 -c "$target" -t 10 -f g 2>/dev/null | grep -E 'receiver' | tail -1 || true)"
+    wait "$session" 2>/dev/null || true
+    GBPS="$(echo "$RESULT" | grep -oE '[0-9]+\.[0-9]+ Gbits/sec' | grep -oE '[0-9]+\.[0-9]+' | head -1 || true)"
+    if [ -n "${GBPS:-}" ]; then
+      # Sanity floor: 50 Gbits/sec (a quarter of a 200G leg — generous;
+      # iperf3 single-stream rarely saturates 200G). Below = investigate.
+      if awk "BEGIN{exit !($GBPS >= 50)}"; then
+        pass "[3] -> $target: ${GBPS} Gbits/sec (>= 50 floor OK)"
       else
-        warn "[3] iperf3 to $target produced no result — check iperf3 on both ends."
+        warn "[3] -> $target: ${GBPS} Gbits/sec is LOW for a 200G leg — check link negotiation, DAC seating, CPU affinity."
       fi
-    done
-  fi
+    else
+      warn "[3] iperf3 to $target produced no result — check iperf3 on both ends."
+    fi
+  done
 fi
 
 # --- [4] PBS backup VLAN -------------------------------------------------
@@ -200,7 +248,13 @@ else
 fi
 
 echo ""
-if [ "$FAIL" -eq 0 ]; then
+if [ "$ACTIVE_PROBES" -eq 0 ]; then
+  if [ "$FAIL" -ne 0 ]; then
+    echo "MTU failures were detected; active UDP and iperf3 checks were not run." >&2
+  fi
+  echo "NET-VERIFY: INCOMPLETE — --active-probes not enabled" >&2
+  exit 2
+elif [ "$FAIL" -eq 0 ]; then
   echo "NET-VERIFY: ALL CHECKS PASSED."
   exit 0
 else
